@@ -1,10 +1,8 @@
--- Rayfield Admin Panel - FIXED AUTO COLLECT BUILD
--- FIX: Changed remote to "crafting.collectCraft" (from your new spy).
--- Prints success/fail for pcall (check console).
--- Fires on load for old crafts.
--- Adjustable delay slider.
--- Manual button with print.
--- No notifs.
+-- Rayfield Admin Panel - FINAL V4 (Cleaned & Filtered)
+-- REMOVED: Auto Crafting (Completely gone).
+-- KEPT: Auto Collect Gear (Fixed version).
+-- OPTIMIZED: Auto Hatch Listener now FILTERS OUT Fish/Weather events.
+--            It only listens to 'state'/'sync'/'replecs' to target Eggs/Inventory.
 
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
@@ -13,10 +11,11 @@ getgenv().RayfieldNotifications = false
 local Window = Rayfield:CreateWindow({
    Name = "Mental Hub",
    LoadingTitle = "Fishies OP Script",
-   LoadingSubtitle = "Join Discord for more!",
+   LoadingSubtitle = "Clean V4: Hatch & Collect",
    ConfigurationSaving = { Enabled = true, FolderName = "GardenAdmin", FileName = "Config" },
    KeySystem = false
 })
+
 local RemoteContainer = game:GetService("ReplicatedStorage")
    :WaitForChild("rbxts_include")
    :WaitForChild("node_modules")
@@ -24,49 +23,91 @@ local RemoteContainer = game:GetService("ReplicatedStorage")
    :WaitForChild("remo")
    :WaitForChild("src")
    :WaitForChild("container")
--- KILL SWITCH: Stop ALL old loops on load
+
+-- GLOBAL CLEANUP
 getgenv().GardenAdminLoops = getgenv().GardenAdminLoops or {}
+getgenv().GardenConnections = getgenv().GardenConnections or {}
+
+-- Kill old loops
 for _, loopThread in ipairs(getgenv().GardenAdminLoops) do
-   if loopThread then
-      task.cancel(loopThread)
-   end
+   if loopThread then task.cancel(loopThread) end
 end
-getgenv().GardenAdminLoops = {} -- Reset table
--- MAX SPEED SYSTEM
-local buyDelay = 0.15
-local sellDelay = 300 -- 5min default for normal sell
-local eventSellDelay = 300 -- 5min default for event sell
-local collectDelay = 2.5 -- Default for auto collect
-local lastBuyTime = {} -- Per-item
+getgenv().GardenAdminLoops = {}
+
+-- Disconnect old listeners
+for _, conn in ipairs(getgenv().GardenConnections) do
+    if conn then conn:Disconnect() end
+end
+getgenv().GardenConnections = {}
+
+-- DATA & HELPERS
+local UUID_Queue = {} 
+local Processed_IDs = {} -- Cache to prevent duplicates
+
+local function isUUID(str)
+    return type(str) == "string" and str:match("%x%x%x%x%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%x%x%x%x%x%x%x%x")
+end
+
+local function recursiveFindUUID(data)
+    if type(data) == "table" then
+        for k, v in pairs(data) do
+            if isUUID(k) and not Processed_IDs[k] then 
+                table.insert(UUID_Queue, k)
+                Processed_IDs[k] = true
+            end
+            if isUUID(v) and not Processed_IDs[v] then 
+                table.insert(UUID_Queue, v)
+                Processed_IDs[v] = true
+            end
+            if type(v) == "table" then recursiveFindUUID(v) end
+        end
+    elseif isUUID(data) and not Processed_IDs[data] then
+        table.insert(UUID_Queue, data)
+        Processed_IDs[data] = true
+    end
+end
+
+-- Setup Network Listener (FILTERED)
+local function setupListener()
+    for _, remote in pairs(RemoteContainer:GetDescendants()) do
+        if remote:IsA("RemoteEvent") then
+            local name = remote.Name:lower()
+            
+            -- WHITELIST: Only listen to Inventory/State updates
+            if name:find("state") or name:find("replecs") or name:find("sync") or name:find("update") then
+                
+                -- BLACKLIST: Explicitly ignore Fish/Weather/Mutation events
+                if not name:find("fish") and not name:find("weather") and not name:find("mutation") then
+                    local conn = remote.OnClientEvent:Connect(function(...)
+                        local args = {...}
+                        recursiveFindUUID(args)
+                    end)
+                    table.insert(getgenv().GardenConnections, conn)
+                end
+            end
+        end
+    end
+end
+setupListener() -- Start Listener
+
 local function safeBuy(remoteName, itemName)
-   lastBuyTime[itemName] = lastBuyTime[itemName] or 0
-   local now = tick()
-   if now - lastBuyTime[itemName] < buyDelay then return false end
-   local success = pcall(function()
-      RemoteContainer[remoteName]:FireServer(itemName)
-   end)
-   if success then
-      lastBuyTime[itemName] = now
-      return true
-   end
-   return false
+    pcall(function() RemoteContainer[remoteName]:FireServer(itemName) end)
 end
--- Selected
-local selectedEggs = {}
-local selectedGears = {}
-local selectedBaits = {}
-local selectedEventItems = {}
-local selectedMerchantItems = {}
--- Loops (now tracked for killing)
-local loops = {egg = false, gear = false, bait = false, normalSell = false, eventSell = false, sacrifice = false, merchant = false, autoCollectGear = false}
+
+local loops = {autoCollectGear = false, egg = false, gear = false, bait = false, hatchListener = false}
 local function startLoop(callback)
    local thread = task.spawn(callback)
    table.insert(getgenv().GardenAdminLoops, thread)
    return thread
 end
--- MAIN TAB
+
+-- TABS
 local MainTab = Window:CreateTab("Main")
-MainTab:CreateSection("Egg Shop - MAX SPEED")
+local MiscTab = Window:CreateTab("Misc")
+
+-- [MAIN TAB]
+MainTab:CreateSection("Egg Shop")
+local selectedEggs = {}
 MainTab:CreateDropdown({
    Name = "Eggs (Multi-Select)",
    Options = {"Starter", "Novice", "Forest", "Polar", "Tropical", "Exotic"},
@@ -76,25 +117,62 @@ MainTab:CreateDropdown({
    Callback = function(v) selectedEggs = v end,
 })
 MainTab:CreateToggle({
-   Name = "Auto Buy Eggs (Full Loop)",
+   Name = "Auto Buy Eggs",
    CurrentValue = false,
    Callback = function(v)
       loops.egg = v
       if v then
          startLoop(function()
             while loops.egg do
-               if #selectedEggs == 0 then task.wait(1) continue end
-               for _, egg in ipairs(selectedEggs) do
-                  if not loops.egg then break end
-                  safeBuy("shop.purchaseEgg", egg)
+               if #selectedEggs > 0 then
+                   for _, egg in ipairs(selectedEggs) do
+                      if not loops.egg then break end
+                      safeBuy("shop.purchaseEgg", egg)
+                   end
                end
-               task.wait(0.05)
+               task.wait(0.15)
             end
          end)
       end
    end,
 })
-MainTab:CreateSection("Gear Shop - MAX SPEED")
+
+-- AUTO HATCH LISTENER SECTION
+MainTab:CreateSection("Auto Hatch (Smart Listener)")
+MainTab:CreateParagraph({Title = "Status", Content = "Filtering active: Ignores Fish/Weather IDs."})
+
+MainTab:CreateToggle({
+   Name = "Auto Hatch (Listen for IDs)",
+   CurrentValue = false,
+   Callback = function(v)
+      loops.hatchListener = v
+      if v then
+         startLoop(function()
+            while loops.hatchListener do
+               -- Process the Queue
+               if #UUID_Queue > 0 then
+                   local idToTry = table.remove(UUID_Queue, 1) -- Get oldest ID
+                   
+                   -- Try to hatch (Invoke + Fire just in case)
+                   task.spawn(function()
+                       pcall(function() RemoteContainer["pets.hatchEgg"]:InvokeServer(idToTry) end)
+                   end)
+                   task.spawn(function()
+                        pcall(function() RemoteContainer["pets.hatchEgg"]:FireServer(idToTry) end)
+                   end)
+                   
+                   task.wait(0.05)
+               else
+                   task.wait(0.5)
+               end
+            end
+         end)
+      end
+   end,
+})
+
+MainTab:CreateSection("Gear Shop")
+local selectedGears = {}
 MainTab:CreateDropdown({
    Name = "Gears (Multi-Select)",
    Options = {
@@ -109,17 +187,18 @@ MainTab:CreateDropdown({
    Callback = function(v) selectedGears = v end,
 })
 MainTab:CreateToggle({
-   Name = "Auto Buy Gears (Full Loop)",
+   Name = "Auto Buy Gears",
    CurrentValue = false,
    Callback = function(v)
       loops.gear = v
       if v then
          startLoop(function()
             while loops.gear do
-               if #selectedGears == 0 then task.wait(1) continue end
-               for _, gear in ipairs(selectedGears) do
-                  if not loops.gear then break end
-                  safeBuy("shop.purchaseGear", gear)
+               if #selectedGears > 0 then
+                   for _, gear in ipairs(selectedGears) do
+                      if not loops.gear then break end
+                      safeBuy("shop.purchaseGear", gear)
+                   end
                end
                task.wait(0.05)
             end
@@ -127,7 +206,9 @@ MainTab:CreateToggle({
       end
    end,
 })
-MainTab:CreateSection("Bait Shop - MAX SPEED")
+
+MainTab:CreateSection("Bait Shop")
+local selectedBaits = {}
 MainTab:CreateDropdown({
    Name = "Baits (Multi-Select)",
    Options = {
@@ -141,17 +222,18 @@ MainTab:CreateDropdown({
    Callback = function(v) selectedBaits = v end,
 })
 MainTab:CreateToggle({
-   Name = "Auto Buy Baits (Full Loop)",
+   Name = "Auto Buy Baits",
    CurrentValue = false,
    Callback = function(v)
       loops.bait = v
       if v then
          startLoop(function()
             while loops.bait do
-               if #selectedBaits == 0 then task.wait(1) continue end
-               for _, bait in ipairs(selectedBaits) do
-                  if not loops.bait then break end
-                  safeBuy("shop.purchaseBait", bait)
+               if #selectedBaits > 0 then
+                   for _, bait in ipairs(selectedBaits) do
+                      if not loops.bait then break end
+                      safeBuy("shop.purchaseBait", bait)
+                   end
                end
                task.wait(0.05)
             end
@@ -159,30 +241,23 @@ MainTab:CreateToggle({
       end
    end,
 })
-MainTab:CreateSection("Auto Sell All Fish")
+
+MainTab:CreateSection("Auto Sell")
+local sellDelay = 300
+local loops_sell = false
 MainTab:CreateToggle({
-   Name = "Auto Sell (Timed)",
+   Name = "Auto Sell All Fish",
    CurrentValue = false,
    Callback = function(v)
-      loops.normalSell = v
+      loops_sell = v
       if v then
          startLoop(function()
-            while loops.normalSell do
-               pcall(function()
-                  RemoteContainer["sellFish.sellAllFish"]:FireServer()
-               end)
+            while loops_sell do
+               pcall(function() RemoteContainer["sellFish.sellAllFish"]:FireServer() end)
                task.wait(sellDelay)
             end
          end)
       end
-   end,
-})
-MainTab:CreateButton({
-   Name = "Manual Sell All Fish",
-   Callback = function()
-      pcall(function()
-         RemoteContainer["sellFish.sellAllFish"]:FireServer()
-      end)
    end,
 })
 MainTab:CreateSlider({
@@ -191,15 +266,15 @@ MainTab:CreateSlider({
    Increment = 30,
    Suffix = "s",
    CurrentValue = 300,
-   Callback = function(v)
-      sellDelay = v
-   end,
+   Callback = function(v) sellDelay = v end,
 })
+
 -- EVENT TAB
 local EventTab = Window:CreateTab("Event")
-EventTab:CreateSection("Event Shop - MAX SPEED")
+EventTab:CreateSection("Event Shop")
+local selectedEventItems = {}
 EventTab:CreateDropdown({
-   Name = "Event Items (Multi-Select)",
+   Name = "Event Items",
    Options = {
       "Atlantis Crate", "Trident Throne", "Poseidon Statue", "Kings Throne",
       "Atlantis Lightpole", "Atlantis Banner"
@@ -210,24 +285,19 @@ EventTab:CreateDropdown({
    Callback = function(v) selectedEventItems = v end,
 })
 EventTab:CreateToggle({
-   Name = "Auto Buy Event Items (Full Loop)",
+   Name = "Auto Buy Event Items",
    CurrentValue = false,
    Callback = function(v)
-      loops.eventBuy = v
+      local l_event = v
       if v then
          startLoop(function()
-            while loops.eventBuy do
-               if #selectedEventItems == 0 then task.wait(1) continue end
-               for _, item in ipairs(selectedEventItems) do
-                  if not loops.eventBuy then break end
-                  -- Map display to remote arg
-                  local remoteArg = item == "Atlantis Crate" and "baitpack:Atlantis" or
-                                    item == "Trident Throne" and "cosmetic:TridentThrone" or
-                                    item == "Poseidon Statue" and "cosmeticExtra:PoseidonStatue" or
-                                    item == "Kings Throne" and "cosmetic:KingsThrone" or
-                                    item == "Atlantis Lightpole" and "cosmeticExtra:AtlantisLightpole" or
-                                    item == "Atlantis Banner" and "cosmeticExtra:AtlantisBanner" or item
-                  safeBuy("shop.purchaseEventItem", remoteArg)
+            while l_event do
+               if #selectedEventItems > 0 then
+                   for _, item in ipairs(selectedEventItems) do
+                      if not l_event then break end
+                      local remoteArg = item == "Atlantis Crate" and "baitpack:Atlantis" or item
+                      safeBuy("shop.purchaseEventItem", remoteArg)
+                   end
                end
                task.wait(0.05)
             end
@@ -235,30 +305,23 @@ EventTab:CreateToggle({
       end
    end,
 })
-EventTab:CreateSection("Auto Sell Event Fish")
+
+EventTab:CreateSection("Event Actions")
+local eventSellDelay = 300
+local loops_eventSell = false
 EventTab:CreateToggle({
-   Name = "Auto Sell Event Fish (Timed)",
+   Name = "Auto Sell Event Fish",
    CurrentValue = false,
    Callback = function(v)
-      loops.eventSell = v
+      loops_eventSell = v
       if v then
          startLoop(function()
-            while loops.eventSell do
-               pcall(function()
-                  RemoteContainer["sellFish.sellAllEventFish"]:FireServer()
-               end)
+            while loops_eventSell do
+               pcall(function() RemoteContainer["sellFish.sellAllEventFish"]:FireServer() end)
                task.wait(eventSellDelay)
             end
          end)
       end
-   end,
-})
-EventTab:CreateButton({
-   Name = "Manual Sell Event Fish",
-   Callback = function()
-      pcall(function()
-         RemoteContainer["sellFish.sellAllEventFish"]:FireServer()
-      end)
    end,
 })
 EventTab:CreateSlider({
@@ -267,70 +330,39 @@ EventTab:CreateSlider({
    Increment = 30,
    Suffix = "s",
    CurrentValue = 300,
-   Callback = function(v)
-      eventSellDelay = v
-   end,
+   Callback = function(v) eventSellDelay = v end,
 })
-EventTab:CreateSection("Auto Submit Event (Sacrifice)")
+
+local loops_sacrifice = false
 EventTab:CreateToggle({
    Name = "Auto Sacrifice All Fish",
    CurrentValue = false,
    Callback = function(v)
-      loops.sacrifice = v
+      loops_sacrifice = v
       if v then
          startLoop(function()
-            while loops.sacrifice do
-               pcall(function()
-                  RemoteContainer["sellFish.sacrificeAllFish"]:FireServer()
-               end)
-               task.wait(1) -- Fast for sacrifice
+            while loops_sacrifice do
+               pcall(function() RemoteContainer["sellFish.sacrificeAllFish"]:FireServer() end)
+               task.wait(1)
             end
          end)
       end
    end,
 })
-EventTab:CreateButton({
-   Name = "Manual Sacrifice All Fish",
-   Callback = function()
-      pcall(function()
-         RemoteContainer["sellFish.sacrificeAllFish"]:FireServer()
-      end)
-   end,
-})
-EventTab:CreateSection("Auto Open Atlantis Crate")
+
+local loops_openCrate = false
 EventTab:CreateToggle({
-   Name = "Auto Open (Normal - 0.5s)",
+   Name = "Auto Open Crate (Fast)",
    CurrentValue = false,
    Callback = function(v)
-      loops.normalOpen = v
+      loops_openCrate = v
       if v then
          startLoop(function()
-            while loops.normalOpen do
+            while loops_openCrate do
                pcall(function()
                   RemoteContainer["tools.equipTool"]:FireServer("Atlantis:normal", "baitPack")
                end)
-               task.wait(0.5) -- Normal speed
-               pcall(function()
-                  RemoteContainer["store.openBaitPack"]:FireServer("Atlantis:normal")
-               end)
-               task.wait(0.5)
-            end
-         end)
-      end
-   end,
-})
-EventTab:CreateToggle({
-   Name = "Auto Open (Fast - 0.01s)",
-   CurrentValue = false,
-   Callback = function(v)
-      loops.fastOpen = v
-      if v then
-         startLoop(function()
-            while loops.fastOpen do
-               pcall(function()
-                  RemoteContainer["tools.equipTool"]:FireServer("Atlantis:normal", "baitPack")
-               end)
-               task.wait(0.01) -- Fast speed
+               task.wait(0.01)
                pcall(function()
                   RemoteContainer["store.openBaitPack"]:FireServer("Atlantis:normal")
                end)
@@ -340,39 +372,11 @@ EventTab:CreateToggle({
       end
    end,
 })
--- ============================================================================
--- MISC TAB
--- ============================================================================
-local MiscTab = Window:CreateTab("Misc")
-MiscTab:CreateSection("Merchant Shop - AUTO BUY")
-MiscTab:CreateDropdown({
-    Name = "Merchant Items (Multi-Select)",
-    Options = {"Zoo", "Wild", "Punk", "Boba", "Ashen"},
-    CurrentOption = {},
-    MultipleOptions = true,
-    Flag = "MerchantDrop",
-    Callback = function(v) selectedMerchantItems = v end,
-})
-MiscTab:CreateToggle({
-    Name = "Auto Buy Merchant Items",
-    CurrentValue = false,
-    Callback = function(v)
-        loops.merchant = v
-        if v then
-            startLoop(function()
-                while loops.merchant do
-                   if #selectedMerchantItems == 0 then task.wait(1) continue end
-                   for _, item in ipairs(selectedMerchantItems) do
-                      if not loops.merchant then break end
-                      pcall(function() RemoteContainer["merchant.purchaseItem"]:FireServer("travelling", item) end)
-                   end
-                   task.wait(0.5)
-                end
-            end)
-        end
-    end,
-})
+
+-- MISC TAB (Collect Only - Crafting Removed)
 MiscTab:CreateSection("Gear Auto Collect")
+local collectDelay = 2.5
+
 MiscTab:CreateToggle({
     Name = "Auto Collect Gear",
     CurrentValue = false,
@@ -381,42 +385,63 @@ MiscTab:CreateToggle({
         if v then
             startLoop(function()
                 while loops.autoCollectGear do
-                    print("Auto loop: Fired collectCraft")
-                    local success, err = pcall(function()
+                    local success = pcall(function()
                         RemoteContainer["crafting.collectCraft"]:FireServer("gear")
                     end)
-                    print(success and "Success: Auto collectCraft" or "Fail: Auto collectCraft - error: " .. (err or "unknown"))
-                    task.wait(collectDelay)
+                    if success then
+                        task.wait(collectDelay)
+                    else
+                        task.wait(5) -- Wait longer if nothing to collect
+                    end
                 end
             end)
         end
     end,
 })
+
 MiscTab:CreateSlider({
    Name = "Collect Delay",
    Range = {1, 10},
    Increment = 0.5,
    Suffix = "s",
    CurrentValue = 2.5,
-   Callback = function(v)
-      collectDelay = v
-   end,
+   Callback = function(v) collectDelay = v end,
 })
-MiscTab:CreateButton({
-   Name = "Manual Collect Gear",
-   Callback = function()
-      print("Manual Fired collectCraft")
-      local success, err = pcall(function()
-         RemoteContainer["crafting.collectCraft"]:FireServer("gear")
-      end)
-      print(success and "Success: Manual collectCraft" or "Fail: Manual collectCraft - error: " .. (err or "unknown"))
-   end,
-})
-Rayfield:LoadConfiguration()
 
--- On Load: Collect any old gear
-print("Script loaded - Fired collectCraft on load")
-local success, err = pcall(function()
-   RemoteContainer["crafting.collectCraft"]:FireServer("gear")
-end)
-print(success and "Success: Load collectCraft" or "Fail: Load collectCraft - error: " .. (err or "unknown"))
+-- Misc: Merchant
+MiscTab:CreateSection("Merchant")
+local selectedMerchantItems = {}
+MiscTab:CreateDropdown({
+    Name = "Merchant Items",
+    Options = {"Zoo", "Wild", "Punk", "Boba", "Ashen"},
+    CurrentOption = {},
+    MultipleOptions = true,
+    Flag = "MerchantDrop",
+    Callback = function(v) selectedMerchantItems = v end,
+})
+local loops_merchant = false
+MiscTab:CreateToggle({
+    Name = "Auto Buy Merchant",
+    CurrentValue = false,
+    Callback = function(v)
+        loops_merchant = v
+        if v then
+            startLoop(function()
+                while loops_merchant do
+                   if #selectedMerchantItems > 0 then
+                       for _, item in ipairs(selectedMerchantItems) do
+                          if not loops_merchant then break end
+                          pcall(function() RemoteContainer["merchant.purchaseItem"]:FireServer("travelling", item) end)
+                       end
+                   end
+                   task.wait(0.5)
+                end
+            end)
+        end
+    end,
+})
+
+-- On Load
+pcall(function() RemoteContainer["crafting.collectCraft"]:FireServer("gear") end)
+
+Rayfield:LoadConfiguration()
