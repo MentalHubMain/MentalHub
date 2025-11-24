@@ -1,0 +1,22 @@
+--[[
+    MENTALHUB - UNIVERSAL LOADER
+]]
+
+local PlaceID = game.PlaceId
+local Games = {
+    [91296119701853] = "https://raw.githubusercontent.com/MentalHubMain/MentalHub/refs/heads/main/Fishies",
+    
+}
+
+local scriptUrl = Games[PlaceID]
+
+if scriptUrl then
+    local success, result = pcall(function() return game:HttpGet(scriptUrl, true) end)
+    if success then
+        loadstring(result)()
+    else
+        warn("MentalHub Error: Failed to load script. " .. tostring(result))
+    end
+else
+    warn("MentalHub: Game Not Supported (ID: " .. PlaceID .. ")")
+end
