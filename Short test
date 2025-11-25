@@ -1,18 +1,16 @@
 --[[
-    MENTALHUB - ULTIMATE PRODUCTION VERSION (V24)
-    Features: Universal Support (Solara/Xeno), Stealth Debug, Webhook, Anti-Crash
+    MENTALHUB - ULTIMATE PRODUCTION VERSION (V24 FIXED)
+    Features: Universal Support, Stealth Debug, Webhook, Restored Config UI
 ]]
 
 -- [ 0. UNIVERSAL COMPATIBILITY CHECK ]
 if not game:IsLoaded() then game.Loaded:Wait() end
 
--- Define a safe request function for all executors
 local http_request = http_request or request or HttpPost or syn.request
 if not http_request then
     warn("MentalHub Warning: Executor does not support HTTP. Webhooks/Key System may fail.")
 end
 
--- Disable Rayfield Intro/Notifications
 getgenv().RayfieldNotifications = false 
 
 --------------------------------------------------------------------------------------
@@ -27,10 +25,11 @@ local Config = {
     provider_workink_id = "WorkInk MentalHub",
     discord_invite = "https://discord.gg/QA2yHSuTjw", 
     game_id = 91296119701853,
-    folder = "MentalHub",
+    
+    -- RESTORED FOLDER NAME TO MATCH OLD CONFIGS
+    folder = "GardenAdmin", 
     key_file = "LicenseKey.txt",
     
-    -- YOUR WEBHOOK
     webhook_url = "https://discord.com/api/webhooks/1442612765087895728/ztN7DH-TuvvjyE1FY8-RCMlILAjqMS6V1Rz0vvdcHkB5uPhZ1IRzjMH73CFwYrGDtnRK" 
 }
 
@@ -41,22 +40,19 @@ if game.PlaceId ~= Config.game_id then
     print("MentalHub: Wrong Game ID (Expected: " .. Config.game_id .. ")")
 end
 
--- [ SAFE LOAD: JUNKIE SDK ]
 local JunkieKeySystem
 local success_sdk, err_sdk = pcall(function()
     JunkieKeySystem = loadstring(game:HttpGet("https://junkie-development.de/sdk/JunkieKeySystem.lua"))()
 end)
 
 if not success_sdk or not JunkieKeySystem then
-    warn("MentalHub Critical: Key SDK Failed. Executor might be blocking connection.")
-    -- Fallback so script doesn't crash
+    warn("MentalHub Critical: Key SDK Failed.")
     JunkieKeySystem = {
         verifyKey = function() return false end,
         getLink = function() return "Error: Connection Blocked" end
     }
 end
 
--- [ SAFE LOAD: RAYFIELD ]
 local Rayfield
 local success_ui, err_ui = pcall(function()
     Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
@@ -67,7 +63,6 @@ if not success_ui then
     return 
 end
 
--- [ UI CLEANER ] (Removes Junkie Popups)
 task.spawn(function()
     local CoreGui = game:GetService("CoreGui")
     while task.wait(1) do
@@ -127,7 +122,6 @@ local function SaveKey(key)
     if writefile then writefile(Config.folder .. "/" .. Config.key_file, key) end
 end
 
--- [ AUTO LOGIN ]
 local savedKeyPath = Config.folder .. "/" .. Config.key_file
 if isfile and isfile(savedKeyPath) then
     local key = readfile(savedKeyPath)
@@ -142,7 +136,6 @@ if isfile and isfile(savedKeyPath) then
     end
 end
 
--- [ LOGIN UI ]
 if not IsLoggedIn then
     local Win = Rayfield:CreateWindow({Name = "MentalHub Login", LoadingTitle = "Auth", ConfigurationSaving = {Enabled = false}, KeySystem = false})
     local Tab = Win:CreateTab("License", 4483362458)
@@ -191,6 +184,7 @@ Rayfield:Notify({Title = "Welcome", Content = IsPremium and "Instant Hatch Activ
 -- [ SERVICES & VARS ]
 local Players, RunService, UserInputService = game:GetService("Players"), game:GetService("RunService"), game:GetService("UserInputService")
 local ReplicatedStorage, TeleportService = game:GetService("ReplicatedStorage"), game:GetService("TeleportService")
+local HttpService = game:GetService("HttpService")
 local LocalPlayer = Players.LocalPlayer
 local RemoteContainer = ReplicatedStorage:WaitForChild("rbxts_include"):WaitForChild("node_modules"):WaitForChild("@rbxts"):WaitForChild("remo"):WaitForChild("src"):WaitForChild("container")
 local TS_Lists = ReplicatedStorage:FindFirstChild("TS") and ReplicatedStorage.TS:FindFirstChild("lists")
@@ -199,7 +193,6 @@ local TS_Lists = ReplicatedStorage:FindFirstChild("TS") and ReplicatedStorage.TS
 local DebugMode = true 
 local function DebugPrint(msg)
     if DebugMode then
-        -- ONLY PRINT ERRORS
         if msg:find("Error") or msg:find("Failed") or msg:find("Critical") then
             warn("MentalHub: " .. msg)
         end
@@ -395,19 +388,167 @@ CharTab:CreateButton({Name="Rejoin", Callback=function() TeleportService:Telepor
 CharTab:CreateButton({Name="Server Hop", Callback=function() local s=game:GetService("HttpService"):JSONDecode(game:HttpGet("https://games.roblox.com/v1/games/"..game.PlaceId.."/servers/Public?sortOrder=Asc&limit=100")); for _,v in pairs(s.data) do if v.playing~=v.maxPlayers then TeleportService:TeleportToPlaceInstance(game.PlaceId, v.id, LocalPlayer) break end end end})
 CharTab:CreateInput({Name="Join Job ID", PlaceholderText="Paste Job ID...", Callback=function(t) TeleportService:TeleportToPlaceInstance(game.PlaceId, t, LocalPlayer) end})
 
+-- [ RESTORED CONFIGURATION SYSTEM ]
 local ConfigTab = Window:CreateTab("Configuration")
-local ConfigName, ConfigFolder, AutoFile = "", "MentalHub", "autoload.txt"
-local function GetConfigs() local f={} for _,v in ipairs(listfiles(ConfigFolder)) do if not v:find(AutoFile) then table.insert(f, v:match("([^\\/]+).json$")) end end return f end
-local function LoadCfg(n) local p=ConfigFolder.."/"..n..".json" if isfile(p) then local d=game:GetService("HttpService"):JSONDecode(readfile(p)) if d then Selections=d.Selections; Settings=d.Settings; Loops=d.Loops; return true end end return false end
+local ConfigName = ""
+local ConfigFolder = "GardenAdmin" -- Restored folder name
+local ConfigFileExt = ".json"
+local AutoloadFile = "autoload.txt"
 
-local CfgDrop = ConfigTab:CreateDropdown({Name="Configs", Options=GetConfigs(), Callback=function(v) if type(v)=="table" then ConfigName=v[1] else ConfigName=v end end})
-ConfigTab:CreateInput({Name="Name", PlaceholderText="Config Name...", Callback=function(t) ConfigName=t end})
-ConfigTab:CreateButton({Name="Save", Callback=function() if ConfigName~="" then writefile(ConfigFolder.."/"..ConfigName..".json", game:GetService("HttpService"):JSONEncode({Selections=Selections,Settings=Settings,Loops=Loops})) CfgDrop:Refresh(GetConfigs(), true) end end})
-ConfigTab:CreateButton({Name="Load", Callback=function() if ConfigName~="" and LoadCfg(ConfigName) then Rayfield:Notify({Title="Loaded", Content="Config Loaded", Duration=2}) end end})
-ConfigTab:CreateButton({Name="Delete", Callback=function() if ConfigName~="" and isfile(ConfigFolder.."/"..ConfigName..".json") then delfile(ConfigFolder.."/"..ConfigName..".json") CfgDrop:Refresh(GetConfigs(), true) end end})
+if not isfolder(ConfigFolder) then makefolder(ConfigFolder) end
+
+local function GetConfigs()
+    local files = listfiles(ConfigFolder)
+    local names = {}
+    for _, file in ipairs(files) do
+        if not file:find("autoload.txt") then
+            local name = file:match("([^\\/]+)"..ConfigFileExt.."$")
+            if name then table.insert(names, name) end
+        end
+    end
+    return names
+end
+
+local function LoadConfigLogic(name)
+    local path = ConfigFolder .. "/" .. name .. ConfigFileExt
+    if isfile(path) then
+        local success, data = pcall(function() return HttpService:JSONDecode(readfile(path)) end)
+        if success then
+            if data.Selections then
+                Selections = data.Selections
+                if EggDrop then EggDrop:Set(Selections.Eggs) end
+                if GearDrop then GearDrop:Set(Selections.Gears) end
+                if BaitDrop then BaitDrop:Set(Selections.Baits) end
+                if EvDrop then EvDrop:Set(Selections.Events) end
+                if MerchDrop then MerchDrop:Set(Selections.Merch) end
+            end
+            if data.Settings then
+                for k, v in pairs(data.Settings) do Settings[k] = v end
+                if not Settings.CollectDelay then Settings.CollectDelay = 10 end
+            end
+            if data.Loops then
+                if Toggles.Egg and data.Loops.Egg then Toggles.Egg:Set(true) end
+                if Toggles.Gear and data.Loops.Gear then Toggles.Gear:Set(true) end
+                if Toggles.Bait and data.Loops.Bait then Toggles.Bait:Set(true) end
+                if Toggles.Event and data.Loops.Event then Toggles.Event:Set(true) end
+                if Toggles.Merchant and data.Loops.Merchant then Toggles.Merchant:Set(true) end
+                if Toggles.Collect and data.Loops.Collect then Toggles.Collect:Set(true) end
+                if Toggles.Sacrifice and data.Loops.Sacrifice then Toggles.Sacrifice:Set(true) end
+                if Toggles.Crate and data.Loops.Crate then Toggles.Crate:Set(true) end
+                if Toggles.Sell and data.Loops.Sell then Toggles.Sell:Set(true) end
+                if Toggles.EventSell and data.Loops.EventSell then Toggles.EventSell:Set(true) end
+                if Toggles.HatchListener and data.Loops.HatchListener then Toggles.HatchListener:Set(true) end
+            end
+            return true
+        end
+    end
+    return false
+end
+
+local ConfigDropdown
+ConfigDropdown = ConfigTab:CreateDropdown({
+    Name = "Config List",
+    Options = GetConfigs(),
+    CurrentOption = {},
+    MultipleOptions = false,
+    Callback = function(v) 
+        if type(v) == "table" then ConfigName = v[1] else ConfigName = v end 
+    end
+})
+
+ConfigTab:CreateInput({
+    Name = "Config Name",
+    PlaceholderText = "Enter name...",
+    RemoveTextAfterFocusLost = false,
+    Callback = function(Text) ConfigName = Text end
+})
+
+ConfigTab:CreateButton({
+    Name = "Create / Overwrite Config",
+    Callback = function()
+        if ConfigName == "" then return end
+        local data = {
+            Selections = Selections,
+            Settings = Settings,
+            Loops = Loops
+        }
+        writefile(ConfigFolder .. "/" .. ConfigName .. ConfigFileExt, HttpService:JSONEncode(data))
+        ConfigDropdown:Refresh(GetConfigs(), true)
+        Rayfield:Notify({Title="Saved", Content="Config saved successfully.", Duration=2})
+    end
+})
+
+ConfigTab:CreateButton({
+    Name = "Load Config",
+    Callback = function()
+        if ConfigName == "" then return end
+        if LoadConfigLogic(ConfigName) then
+            Rayfield:Notify({Title="Loaded", Content="Config loaded & started.", Duration=2})
+        end
+    end
+})
+
+ConfigTab:CreateButton({
+    Name = "Delete Config",
+    Callback = function()
+        if ConfigName == "" then return end
+        local path = ConfigFolder .. "/" .. ConfigName .. ConfigFileExt
+        if isfile(path) then
+            delfile(path)
+            ConfigDropdown:Refresh(GetConfigs(), true)
+            Rayfield:Notify({Title="Deleted", Content="Config deleted.", Duration=2})
+        end
+    end
+})
+
+ConfigTab:CreateButton({
+    Name = "Refresh List",
+    Callback = function()
+        ConfigDropdown:Refresh(GetConfigs(), true)
+    end
+})
+
+ConfigTab:CreateSection("Autoload")
+
+ConfigTab:CreateButton({
+    Name = "Set Current as Autoload",
+    Callback = function()
+        if ConfigName ~= "" then
+            writefile(ConfigFolder .. "/" .. AutoloadFile, ConfigName)
+            Rayfield:Notify({Title="Autoload", Content="Set to: " .. ConfigName, Duration=2})
+        end
+    end
+})
+
+ConfigTab:CreateButton({
+    Name = "Reset Autoload",
+    Callback = function()
+        if isfile(ConfigFolder .. "/" .. AutoloadFile) then
+            delfile(ConfigFolder .. "/" .. AutoloadFile)
+            Rayfield:Notify({Title="Autoload", Content="Reset (None)", Duration=2})
+        end
+    end
+})
+
 ConfigTab:CreateSection("System")
-ConfigTab:CreateButton({Name="Unload Script", Callback=function() Rayfield:Destroy(); for _,t in ipairs(getgenv().GardenLoops) do task.cancel(t) end; getgenv().GardenLoops={} end})
-if isfile(ConfigFolder.."/"..AutoFile) then LoadCfg(readfile(ConfigFolder.."/"..AutoFile)) end
+ConfigTab:CreateButton({
+    Name = "Unload Script",
+    Callback = function()
+        Rayfield:Destroy()
+        for _, t in ipairs(getgenv().GardenLoops) do task.cancel(t) end
+        getgenv().GardenLoops = {}
+        for _, c in ipairs(getgenv().GardenConnections) do c:Disconnect() end
+        getgenv().GardenConnections = {}
+    end
+})
+
+if isfile(ConfigFolder .. "/" .. AutoloadFile) then
+    local autoName = readfile(ConfigFolder .. "/" .. AutoloadFile)
+    if LoadConfigLogic(autoName) then Rayfield:Notify({Title="Autoload", Content="Loaded: " .. autoName, Duration=3}) end
+end
+
+ConfigTab:CreateSection("Info")
+ConfigTab:CreateButton({ Name = "Copy Discord Link", Callback = function() setclipboard(Config.discord_invite) Rayfield:Notify({Title="Success", Content="Discord link copied!", Duration=2.5}) end })
 
 Rayfield:LoadConfiguration()
-print("MENTALHUB LOADED")
+print("MENTALHUB V24 LOADED")
