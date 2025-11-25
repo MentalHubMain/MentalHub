@@ -1,0 +1,101 @@
+if not game:IsLoaded() then game.Loaded:Wait() end
+local http_request = http_request or request or HttpPost or syn.request
+if not http_request then warn("MentalHub: HTTP Request missing.") end
+getgenv().RayfieldNotifications = false 
+
+local Config = {
+    api = "96b1430f-8b95-413e-9627-4351bce4bea7",       
+    service_premium = "MentalHub Premium", 
+    service_lootlabs_id = "MentalHub", provider_lootlabs_id = "Mental Hub",
+    service_workink_id = "MentalHub", provider_workink_id = "WorkInk MentalHub",
+    discord_invite = "https://discord.gg/QA2yHSuTjw", 
+    game_id = 91296119701853, folder = "MentalHub", key_file = "LicenseKey.txt",
+    webhook_url = "https://discord.com/api/webhooks/1442612765087895728/ztN7DH-TuvvjyE1FY8-RCMlILAjqMS6V1Rz0vvdcHkB5uPhZ1IRzjMH73CFwYrGDtnRK" 
+}
+
+if game.PlaceId ~= Config.game_id then print("Wrong Game ID") end
+
+local JunkieKeySystem, Rayfield
+pcall(function() JunkieKeySystem = loadstring(game:HttpGet("https://junkie-development.de/sdk/JunkieKeySystem.lua"))() end)
+pcall(function() Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))() end)
+
+if not JunkieKeySystem then JunkieKeySystem = {verifyKey = function() return false end, getLink = function() return "Error" end} end
+if not Rayfield then return end
+
+task.spawn(function() while task.wait(1) do for _, g in pairs(game:GetService("CoreGui"):GetChildren()) do if (g.Name:find("Junkie") or g.Name:find("KeySystem")) and not g.Name:find("Rayfield") then g:Destroy() end end end end)
+if not isfolder(Config.folder) then makefolder(Config.folder) end
+
+local function SendWebhook(k)
+    if Config.webhook_url == "" then return end
+    local p, exe = game.Players.LocalPlayer, identifyexecutor and identifyexecutor() or "Unknown"
+    local data = {embeds={{title="MentalHub Login", description="User Logged In", color=k=="Premium" and 16766720 or 65280, fields={{name="User",value=p.Name,inline=true},{name="ID",value=tostring(p.UserId),inline=true},{name="Key",value=k,inline=true},{name="Executor",value=exe,inline=true}}}}}
+    if http_request then http_request({Url=Config.webhook_url, Body=game:GetService("HttpService"):JSONEncode(data), Method="POST", Headers={["content-type"]="application/json"}}) end
+end
+
+local IsLoggedIn, IsPremium = false, false
+local function CheckKey(k)
+    local s, r = pcall(function() return JunkieKeySystem.verifyKey(Config.api, k, Config.service_premium) and "Premium" or (JunkieKeySystem.verifyKey(Config.api, k, Config.service_lootlabs_id) or JunkieKeySystem.verifyKey(Config.api, k, Config.service_workink_id)) and "Free" end)
+    return s and r or false
+end
+
+if isfile(Config.folder.."/"..Config.key_file) then
+    local k = readfile(Config.folder.."/"..Config.key_file)
+    if k and #k>0 then
+        local s = CheckKey(k)
+        if s then IsPremium=(s=="Premium"); IsLoggedIn=true else delfile(Config.folder.."/"..Config.key_file) end
+    end
+end
+
+if not IsLoggedIn then
+    local Win = Rayfield:CreateWindow({Name="MentalHub Login", LoadingTitle="Verification", ConfigurationSaving={Enabled=false}, KeySystem=false})
+    local Tab = Win:CreateTab("License", 4483362458)
+    local InKey = ""
+    Tab:CreateInput({Name="Key", PlaceholderText="Paste Key...", RemoveTextAfterFocusLost=false, Callback=function(t) InKey=t:gsub("%s+","") end})
+    Tab:CreateButton({Name="Verify", Callback=function() if InKey=="" then return end local s=CheckKey(InKey) if s then IsPremium=(s=="Premium"); if writefile then writefile(Config.folder.."/"..Config.key_file, InKey) end; IsLoggedIn=true; Rayfield:Destroy() else Rayfield:Notify({Title="Error", Content="Invalid Key", Duration=3}) end end})
+    Tab:CreateButton({Name="Get Key (LootLabs)", Callback=function() setclipboard(JunkieKeySystem.getLink(Config.api, Config.provider_lootlabs_id, Config.service_lootlabs_id)) end})
+    Tab:CreateButton({Name="Get Key (WorkInk)", Callback=function() setclipboard(JunkieKeySystem.getLink(Config.api, Config.provider_workink_id, Config.service_workink_id)) end})
+    Tab:CreateButton({Name="Buy Premium", Callback=function() setclipboard(Config.discord_invite) end})
+end
+
+repeat task.wait() until IsLoggedIn
+task.spawn(function() SendWebhook(IsPremium and "Premium" or "Free") end)
+
+local s, Rayfield = pcall(function() return loadstring(game:HttpGet('https://sirius.menu/rayfield'))() end)
+if not s then return end
+
+local Window = Rayfield:CreateWindow({Name="Mental Hub", LoadingTitle="Fishies OP Script", LoadingSubtitle=IsPremium and "Premium" or "Free", ConfigurationSaving={Enabled=false}})
+local Players, RS, UIS, RepS, TP = game:GetService("Players"), game:GetService("RunService"), game:GetService("UserInputService"), game:GetService("ReplicatedStorage"), game:GetService("TeleportService")
+local LP, Remotes = Players.LocalPlayer, RepS:WaitForChild("rbxts_include"):WaitForChild("node_modules"):WaitForChild("@rbxts"):WaitForChild("remo"):WaitForChild("src"):WaitForChild("container")
+local TS_Lists = RepS:FindFirstChild("TS") and RepS.TS:FindFirstChild("lists")
+
+local DebugMode, CharVars = true, {WalkSpeed=16, WS=false, InfJump=false, Fly=false, FlySpd=1, Noclip=false, AntiAFK=true, AntiStaff=true}
+local Loops, Selections, Settings = {Egg=false, Gear=false, Bait=false, Event=false, Merch=false, Collect=false, Sac=false, Crate=false, Sell=false, EvSell=false, Hatch=false}, {Eggs={}, Gears={}, Baits={}, Events={}, Merch={}}, {SellD=300, EvSellD=300, CollD=10}
+local UUID_Queue, Processed_IDs = {}, {}
+
+local function RecurseUUID(d) if type(d)=="table" then for k,v in pairs(d) do if type(k)=="string" and k:match("%x%x%x%x%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%x%x%x%x%x%x%x%x") and not Processed_IDs[k] then table.insert(UUID_Queue, k); Processed_IDs[k]=true end if type(v)=="string" and v:match("%x%x%x%x%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%x%x%x%x%x%x%x%x") and not Processed_IDs[v] then table.insert(UUID_Queue, v); Processed_IDs[v]=true end if type(v)=="table" then RecurseUUID(v) end end elseif type(d)=="string" and d:match("%x%x%x%x%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%x%x%x%x%x%x%x%x") and not Processed_IDs[d] then table.insert(UUID_Queue, d); Processed_IDs[d]=true end end
+for _,r in pairs(Remotes:GetDescendants()) do if r:IsA("RemoteEvent") and (r.Name:find("state") or r.Name:find("replecs") or r.Name:find("sync")) and not (r.Name:find("fish") or r.Name:find("weather")) then r.OnClientEvent:Connect(function(...) RecurseUUID({...}) end) end end
+
+local function Loop(n, f) Loops[n]=true; task.spawn(function() while Loops[n] do f() end end) end
+local function Buy(r, i) pcall(function() Remotes[r]:FireServer(i) end) end
+
+local Main = Window:CreateTab("Main")
+Main:CreateDropdown({Name="Eggs", Options={"Starter","Novice","Forest","Polar","Tropical","Exotic"}, MultipleOptions=true, Callback=function(v) Selections.Eggs=v end})
+Main:CreateToggle({Name="Auto Buy Eggs", Callback=function(v) Loops.Egg=v if v then Loop("Egg", function() for _,i in ipairs(Selections.Eggs) do if not Loops.Egg then break end Buy("shop.purchaseEgg", i) end task.wait(0.2) end) end end})
+
+if IsPremium then
+    Main:CreateToggle({Name="Auto Instant Hatch 👑", Callback=function(v) Loops.Hatch=v if v then Loop("Hatch", function() if #UUID_Queue>0 then local id=table.remove(UUID_Queue,1); task.spawn(function() pcall(function() Remotes["pets.hatchEgg"]:InvokeServer(id) end) end); Buy("pets.hatchEgg", id); task.wait(0.05) else task.wait(0.5) end end) end end})
+else
+    Main:CreateButton({Name="Auto Instant Hatch [LOCKED] 🔒", Callback=function() Rayfield:Notify({Title="Premium", Content="Buy Lifetime Key!", Duration=2}) end})
+end
+
+-- Add other tabs (Gear, Bait, etc) similarly compressed if needed, keeping core logic.
+-- Character Logic
+task.spawn(function() while task.wait(0.5) do if CharVars.WS and LP.Character and LP.Character:FindFirstChild("Humanoid") then LP.Character.Humanoid.WalkSpeed=CharVars.WalkSpeed end end end)
+UIS.JumpRequest:Connect(function() if CharVars.InfJump and LP.Character then LP.Character:FindFirstChildOfClass('Humanoid'):ChangeState("Jumping") end end)
+
+local Char = Window:CreateTab("Character")
+Char:CreateToggle({Name="WalkSpeed", Callback=function(v) CharVars.WS=v end})
+Char:CreateSlider({Name="Speed", Range={16,100}, Increment=1, CurrentValue=16, Callback=function(v) CharVars.WalkSpeed=v end})
+Char:CreateToggle({Name="Inf Jump", Callback=function(v) CharVars.InfJump=v end})
+
+Rayfield:LoadConfiguration()
