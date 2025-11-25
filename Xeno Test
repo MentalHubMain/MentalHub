@@ -1,16 +1,23 @@
 --[[
-    MENTALHUB - UNIVERSAL COMPATIBILITY VERSION
-    Fixes issues with Solara, Xeno, and Incognito
+    MENTALHUB - UNIVERSAL PRODUCTION VERSION (V24 STEALTH + LOGGING + XENO/SOLARA SUPPORT)
+    Features: Key System + Mental Hub V22 + Refined Character Mods + Error-Only Debug + Webhook
+    
+    INSTRUCTIONS:
+    1. Copy all code below.
+    2. Obfuscate it.
+    3. Host on GitHub/Pastebin.
+    4. Use loadstring in your loader.
 ]]
 
--- [ 0. EXECUTOR COMPATIBILITY CHECK ]
+-- [ 0. UNIVERSAL COMPATIBILITY CHECK ]
 if not game:IsLoaded() then game.Loaded:Wait() end
 
--- Define a safe request function for all executors
+-- Define a safe request function for all executors (Solara, Xeno, etc.)
 local http_request = http_request or request or HttpPost or syn.request
 if not http_request then
-    game.Players.LocalPlayer:Kick("MentalHub Error: Your executor does not support HTTP Requests.")
-    return
+    -- Some executors like Solara might not support ANY request function in free version, 
+    -- but we try to continue anyway for the game script part.
+    warn("MentalHub Warning: HTTP Request function missing. Key System/Webhook might fail.")
 end
 
 -- Disable Notifications early
@@ -30,6 +37,8 @@ local Config = {
     game_id = 91296119701853,
     folder = "MentalHub",
     key_file = "LicenseKey.txt",
+    
+    -- WEBHOOK URL (Hidden in obfuscation)
     webhook_url = "https://discord.com/api/webhooks/1442612765087895728/ztN7DH-TuvvjyE1FY8-RCMlILAjqMS6V1Rz0vvdcHkB5uPhZ1IRzjMH73CFwYrGDtnRK" 
 }
 
@@ -38,7 +47,6 @@ local Config = {
 --------------------------------------------------------------------------------------
 if game.PlaceId ~= Config.game_id then 
     print("MentalHub: Wrong Game ID")
-    -- warn("Wrong Game ID") 
 end
 
 -- [ SAFE LOAD: JUNKIE SDK ]
@@ -48,9 +56,8 @@ local success_sdk, err_sdk = pcall(function()
 end)
 
 if not success_sdk or not JunkieKeySystem then
-    warn("MentalHub Critical Error: Failed to load Key System SDK.")
-    warn("Error details: " .. tostring(err_sdk))
-    -- Create a fallback dummy system so the script doesn't crash, just bypasses or kicks
+    warn("MentalHub Critical: Key System Failed to Load.")
+    -- Fallback to allow script to run even if auth fails on weak executors
     JunkieKeySystem = {
         verifyKey = function() return false end,
         getLink = function() return "Error: Executor blocked connection" end
@@ -64,8 +71,7 @@ local success_ui, err_ui = pcall(function()
 end)
 
 if not success_ui then
-    warn("MentalHub Critical Error: Failed to load UI Library.")
-    warn("Your executor might not support Rayfield.")
+    warn("MentalHub Critical: UI Failed to Load.")
     return -- Cannot continue without UI
 end
 
@@ -98,7 +104,7 @@ local function SendWebhook(keyType)
         ["title"] = "MentalHub Executed",
         ["description"] = "A user has successfully logged in.",
         ["type"] = "rich",
-        ["color"] = keyType == "Premium" and 16766720 or 65280,
+        ["color"] = keyType == "Premium" and 16766720 or 65280, 
         ["fields"] = {
             {["name"] = "Username", ["value"] = LocalPlayer.Name .. " (" .. LocalPlayer.DisplayName .. ")", ["inline"] = true},
             {["name"] = "User ID", ["value"] = tostring(LocalPlayer.UserId), ["inline"] = true},
@@ -127,14 +133,13 @@ local IsLoggedIn = false
 local IsPremium = false
 
 local function CheckKey(key)
-    -- Pcall the verify function to prevent crashing on weak executors
+    -- Wrapped in pcall for safety on weak executors
     local success, result = pcall(function()
         if JunkieKeySystem.verifyKey(Config.api, key, Config.service_premium) then return "Premium" end
         if JunkieKeySystem.verifyKey(Config.api, key, Config.service_lootlabs_id) then return "Free" end
         if JunkieKeySystem.verifyKey(Config.api, key, Config.service_workink_id) then return "Free" end
         return false
     end)
-    
     if success then return result else return false end
 end
 
@@ -210,14 +215,14 @@ if not IsLoggedIn then
        Name = "Get Key (via LootLabs)",
        Callback = function()
           local link = JunkieKeySystem.getLink(Config.api, Config.provider_lootlabs_id, Config.service_lootlabs_id)
-          if link and not link:find("Error") then setclipboard(link); Rayfield:Notify({Title = "LootLabs", Content = "Link copied!", Duration = 3}) else Rayfield:Notify({Title = "Error", Content = "Failed to generate link", Duration = 3}) end
+          if link and not link:find("Error") then setclipboard(link); Rayfield:Notify({Title = "LootLabs", Content = "Link copied!", Duration = 3}) else Rayfield:Notify({Title = "Error", Content = "Check Config IDs", Duration = 3}) end
        end,
     })
     LoginTab:CreateButton({
        Name = "Get Key (via WorkInk)",
        Callback = function()
           local link = JunkieKeySystem.getLink(Config.api, Config.provider_workink_id, Config.service_workink_id)
-          if link and not link:find("Error") then setclipboard(link); Rayfield:Notify({Title = "WorkInk", Content = "Link copied!", Duration = 3}) else Rayfield:Notify({Title = "Error", Content = "Failed to generate link", Duration = 3}) end
+          if link and not link:find("Error") then setclipboard(link); Rayfield:Notify({Title = "WorkInk", Content = "Link copied!", Duration = 3}) else Rayfield:Notify({Title = "Error", Content = "Check Config IDs", Duration = 3}) end
        end,
     })
     LoginTab:CreateSection("Premium")
@@ -275,10 +280,13 @@ local TS_Lists = nil
 if ReplicatedStorage:FindFirstChild("TS") then TS_Lists = ReplicatedStorage.TS:FindFirstChild("lists") end
 
 -- [ STEALTH DEBUG STATE ]
-local DebugMode = true -- Enabled for premium users secretly
+local DebugMode = true 
 local function DebugPrint(msg)
     if DebugMode then
-        print("System Log: " .. msg) 
+        -- Use warn for errors so they stand out, but only if called for errors
+        if msg:find("Error") or msg:find("Failed") then
+            warn("System Log: " .. msg) 
+        end
     end
 end
 
@@ -455,7 +463,7 @@ local Selections = { Eggs = {}, Gears = {}, Baits = {}, Events = {}, Merch = {} 
 local Settings = { SellDelay = 300, EventSellDelay = 300, CollectDelay = 10 }
 local Toggles = {} 
 
--- INSTANT HATCH LOGIC (STEALTH)
+-- INSTANT HATCH LOGIC (STEALTH - ERROR LOGS ONLY)
 local UUID_Queue = {} 
 local Processed_IDs = {} 
 local function isUUID(str) return type(str) == "string" and str:match("%x%x%x%x%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%x%x%x%x%x%x%x%x") end
@@ -465,17 +473,17 @@ local function recursiveFindUUID(data)
         for k, v in pairs(data) do
             if isUUID(k) and not Processed_IDs[k] then 
                 table.insert(UUID_Queue, k); Processed_IDs[k] = true; 
-                DebugPrint("Resource Located (1)") -- Stealth Log
+                -- DebugPrint("Resource Located (1)") -- DISABLED SPAM
             end
             if isUUID(v) and not Processed_IDs[v] then 
                 table.insert(UUID_Queue, v); Processed_IDs[v] = true; 
-                DebugPrint("Resource Located (2)") -- Stealth Log
+                -- DebugPrint("Resource Located (2)") -- DISABLED SPAM
             end
             if type(v) == "table" then recursiveFindUUID(v) end
         end
     elseif isUUID(data) and not Processed_IDs[data] then
         table.insert(UUID_Queue, data); Processed_IDs[data] = true; 
-        DebugPrint("Resource Located (3)") -- Stealth Log
+        -- DebugPrint("Resource Located (3)") -- DISABLED SPAM
     end
 end
 
@@ -522,10 +530,10 @@ local function ToggleHatchListener(v)
                 if #UUID_Queue > 0 then 
                     local idToTry = table.remove(UUID_Queue, 1) 
                     
-                    DebugPrint("Action Triggered") -- Stealth: Means "Trying to Hatch"
+                    -- DebugPrint("Action Triggered") -- DISABLED SPAM
                     
                     if not RemoteContainer:FindFirstChild("pets.hatchEgg") then 
-                        DebugPrint("Fatal Error 404") -- Stealth: Remote Missing
+                        DebugPrint("Fatal Error 404") -- KEPT (Critical)
                     end 
 
                     task.spawn(function() 
@@ -533,7 +541,7 @@ local function ToggleHatchListener(v)
                             RemoteContainer["pets.hatchEgg"]:InvokeServer(idToTry) 
                         end) 
                         if not success then 
-                            DebugPrint("Sync Error") -- Stealth: Invoke Failed (e.g., Inv Full)
+                            DebugPrint("Sync Error: " .. tostring(err)) -- KEPT (Useful for debugging inventory full)
                         end 
                     end) 
 
@@ -582,8 +590,7 @@ MainTab:CreateSection("Egg Hatcher")
 
 if IsPremium then
     Toggles.HatchListener = MainTab:CreateToggle({ Name = "Auto Instant Hatch 👑", Callback = ToggleHatchListener })
-    -- DEBUG MODE IS ON BY DEFAULT BUT HIDDEN FROM UI
-    DebugMode = true 
+    DebugMode = true -- Enabled for error logging
 else
     MainTab:CreateButton({ Name = "Auto Instant Hatch [PREMIUM LOCKED] 🔒", Callback = function() Rayfield:Notify({Title="Premium Required", Content="Join Discord to buy the Lifetime Key!", Duration=2.5}) end })
 end
