@@ -1,101 +1,413 @@
+--[[
+    MENTALHUB - ULTIMATE PRODUCTION VERSION (V24)
+    Features: Universal Support (Solara/Xeno), Stealth Debug, Webhook, Anti-Crash
+]]
+
+-- [ 0. UNIVERSAL COMPATIBILITY CHECK ]
 if not game:IsLoaded() then game.Loaded:Wait() end
+
+-- Define a safe request function for all executors
 local http_request = http_request or request or HttpPost or syn.request
-if not http_request then warn("MentalHub: HTTP Request missing.") end
+if not http_request then
+    warn("MentalHub Warning: Executor does not support HTTP. Webhooks/Key System may fail.")
+end
+
+-- Disable Rayfield Intro/Notifications
 getgenv().RayfieldNotifications = false 
 
+--------------------------------------------------------------------------------------
+-- [ 1. CONFIGURATION ]
+--------------------------------------------------------------------------------------
 local Config = {
     api = "96b1430f-8b95-413e-9627-4351bce4bea7",       
     service_premium = "MentalHub Premium", 
-    service_lootlabs_id = "MentalHub", provider_lootlabs_id = "Mental Hub",
-    service_workink_id = "MentalHub", provider_workink_id = "WorkInk MentalHub",
+    service_lootlabs_id = "MentalHub",
+    provider_lootlabs_id = "Mental Hub",
+    service_workink_id = "MentalHub",
+    provider_workink_id = "WorkInk MentalHub",
     discord_invite = "https://discord.gg/QA2yHSuTjw", 
-    game_id = 91296119701853, folder = "MentalHub", key_file = "LicenseKey.txt",
+    game_id = 91296119701853,
+    folder = "MentalHub",
+    key_file = "LicenseKey.txt",
+    
+    -- YOUR WEBHOOK
     webhook_url = "https://discord.com/api/webhooks/1442612765087895728/ztN7DH-TuvvjyE1FY8-RCMlILAjqMS6V1Rz0vvdcHkB5uPhZ1IRzjMH73CFwYrGDtnRK" 
 }
 
-if game.PlaceId ~= Config.game_id then print("Wrong Game ID") end
+--------------------------------------------------------------------------------------
+-- [ 2. SETUP & SERVICES ]
+--------------------------------------------------------------------------------------
+if game.PlaceId ~= Config.game_id then 
+    print("MentalHub: Wrong Game ID (Expected: " .. Config.game_id .. ")")
+end
 
-local JunkieKeySystem, Rayfield
-pcall(function() JunkieKeySystem = loadstring(game:HttpGet("https://junkie-development.de/sdk/JunkieKeySystem.lua"))() end)
-pcall(function() Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))() end)
+-- [ SAFE LOAD: JUNKIE SDK ]
+local JunkieKeySystem
+local success_sdk, err_sdk = pcall(function()
+    JunkieKeySystem = loadstring(game:HttpGet("https://junkie-development.de/sdk/JunkieKeySystem.lua"))()
+end)
 
-if not JunkieKeySystem then JunkieKeySystem = {verifyKey = function() return false end, getLink = function() return "Error" end} end
-if not Rayfield then return end
+if not success_sdk or not JunkieKeySystem then
+    warn("MentalHub Critical: Key SDK Failed. Executor might be blocking connection.")
+    -- Fallback so script doesn't crash
+    JunkieKeySystem = {
+        verifyKey = function() return false end,
+        getLink = function() return "Error: Connection Blocked" end
+    }
+end
 
-task.spawn(function() while task.wait(1) do for _, g in pairs(game:GetService("CoreGui"):GetChildren()) do if (g.Name:find("Junkie") or g.Name:find("KeySystem")) and not g.Name:find("Rayfield") then g:Destroy() end end end end)
+-- [ SAFE LOAD: RAYFIELD ]
+local Rayfield
+local success_ui, err_ui = pcall(function()
+    Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+end)
+
+if not success_ui then
+    warn("MentalHub Critical: UI Failed. " .. tostring(err_ui))
+    return 
+end
+
+-- [ UI CLEANER ] (Removes Junkie Popups)
+task.spawn(function()
+    local CoreGui = game:GetService("CoreGui")
+    while task.wait(1) do
+        for _, gui in pairs(CoreGui:GetChildren()) do
+            if (gui.Name:find("Junkie") or gui.Name:find("KeySystem")) and not gui.Name:find("Rayfield") then
+                gui:Destroy()
+            end
+        end
+    end
+end)
+
 if not isfolder(Config.folder) then makefolder(Config.folder) end
 
-local function SendWebhook(k)
+--------------------------------------------------------------------------------------
+-- [ 3. WEBHOOK SYSTEM ]
+--------------------------------------------------------------------------------------
+local function SendWebhook(keyType)
     if Config.webhook_url == "" then return end
-    local p, exe = game.Players.LocalPlayer, identifyexecutor and identifyexecutor() or "Unknown"
-    local data = {embeds={{title="MentalHub Login", description="User Logged In", color=k=="Premium" and 16766720 or 65280, fields={{name="User",value=p.Name,inline=true},{name="ID",value=tostring(p.UserId),inline=true},{name="Key",value=k,inline=true},{name="Executor",value=exe,inline=true}}}}}
-    if http_request then http_request({Url=Config.webhook_url, Body=game:GetService("HttpService"):JSONEncode(data), Method="POST", Headers={["content-type"]="application/json"}}) end
-end
-
-local IsLoggedIn, IsPremium = false, false
-local function CheckKey(k)
-    local s, r = pcall(function() return JunkieKeySystem.verifyKey(Config.api, k, Config.service_premium) and "Premium" or (JunkieKeySystem.verifyKey(Config.api, k, Config.service_lootlabs_id) or JunkieKeySystem.verifyKey(Config.api, k, Config.service_workink_id)) and "Free" end)
-    return s and r or false
-end
-
-if isfile(Config.folder.."/"..Config.key_file) then
-    local k = readfile(Config.folder.."/"..Config.key_file)
-    if k and #k>0 then
-        local s = CheckKey(k)
-        if s then IsPremium=(s=="Premium"); IsLoggedIn=true else delfile(Config.folder.."/"..Config.key_file) end
+    local LocalPlayer = game:GetService("Players").LocalPlayer
+    local executor = identifyexecutor and identifyexecutor() or "Unknown"
+    
+    local embed = {
+        ["title"] = "MentalHub Login",
+        ["color"] = keyType == "Premium" and 16766720 or 65280,
+        ["fields"] = {
+            {["name"] = "User", ["value"] = LocalPlayer.Name .. " (" .. LocalPlayer.UserId .. ")", ["inline"] = true},
+            {["name"] = "Key", ["value"] = keyType, ["inline"] = true},
+            {["name"] = "Executor", ["value"] = executor, ["inline"] = true},
+            {["name"] = "Age", ["value"] = tostring(LocalPlayer.AccountAge).." days", ["inline"] = true}
+        },
+        ["footer"] = {["text"] = "MentalHub V24"}
+    }
+    
+    local body = game:GetService("HttpService"):JSONEncode({["embeds"] = {embed}})
+    if http_request then
+        http_request({Url = Config.webhook_url, Body = body, Method = "POST", Headers = {["content-type"] = "application/json"}})
     end
 end
 
+--------------------------------------------------------------------------------------
+-- [ 4. KEY LOGIC ]
+--------------------------------------------------------------------------------------
+local IsLoggedIn = false
+local IsPremium = false
+
+local function CheckKey(key)
+    local success, result = pcall(function()
+        if JunkieKeySystem.verifyKey(Config.api, key, Config.service_premium) then return "Premium" end
+        if JunkieKeySystem.verifyKey(Config.api, key, Config.service_lootlabs_id) then return "Free" end
+        if JunkieKeySystem.verifyKey(Config.api, key, Config.service_workink_id) then return "Free" end
+        return false
+    end)
+    return success and result or false
+end
+
+local function SaveKey(key)
+    if writefile then writefile(Config.folder .. "/" .. Config.key_file, key) end
+end
+
+-- [ AUTO LOGIN ]
+local savedKeyPath = Config.folder .. "/" .. Config.key_file
+if isfile and isfile(savedKeyPath) then
+    local key = readfile(savedKeyPath)
+    if key and #key > 0 then
+        local status = CheckKey(key)
+        if status then
+            IsPremium = (status == "Premium")
+            IsLoggedIn = true
+        else
+            if delfile then delfile(savedKeyPath) end
+        end
+    end
+end
+
+-- [ LOGIN UI ]
 if not IsLoggedIn then
-    local Win = Rayfield:CreateWindow({Name="MentalHub Login", LoadingTitle="Verification", ConfigurationSaving={Enabled=false}, KeySystem=false})
+    local Win = Rayfield:CreateWindow({Name = "MentalHub Login", LoadingTitle = "Auth", ConfigurationSaving = {Enabled = false}, KeySystem = false})
     local Tab = Win:CreateTab("License", 4483362458)
-    local InKey = ""
-    Tab:CreateInput({Name="Key", PlaceholderText="Paste Key...", RemoveTextAfterFocusLost=false, Callback=function(t) InKey=t:gsub("%s+","") end})
-    Tab:CreateButton({Name="Verify", Callback=function() if InKey=="" then return end local s=CheckKey(InKey) if s then IsPremium=(s=="Premium"); if writefile then writefile(Config.folder.."/"..Config.key_file, InKey) end; IsLoggedIn=true; Rayfield:Destroy() else Rayfield:Notify({Title="Error", Content="Invalid Key", Duration=3}) end end})
-    Tab:CreateButton({Name="Get Key (LootLabs)", Callback=function() setclipboard(JunkieKeySystem.getLink(Config.api, Config.provider_lootlabs_id, Config.service_lootlabs_id)) end})
-    Tab:CreateButton({Name="Get Key (WorkInk)", Callback=function() setclipboard(JunkieKeySystem.getLink(Config.api, Config.provider_workink_id, Config.service_workink_id)) end})
-    Tab:CreateButton({Name="Buy Premium", Callback=function() setclipboard(Config.discord_invite) end})
+    local InputKey = ""
+    
+    Tab:CreateInput({Name = "Key", PlaceholderText = "Paste Key...", RemoveTextAfterFocusLost = false, Callback = function(t) InputKey = t:gsub("%s+", "") end})
+    Tab:CreateButton({Name = "Verify", Callback = function() 
+        if InputKey == "" then return end
+        Rayfield:Notify({Title="Checking...", Content="Verifying Key...", Duration=1})
+        local status = CheckKey(InputKey)
+        if status then
+            IsPremium = (status == "Premium")
+            SaveKey(InputKey)
+            IsLoggedIn = true
+            Rayfield:Destroy()
+        else
+            Rayfield:Notify({Title="Error", Content="Invalid Key", Duration=3})
+        end
+    end})
+    
+    Tab:CreateSection("Links")
+    Tab:CreateButton({Name = "Get Key (LootLabs)", Callback = function() setclipboard(JunkieKeySystem.getLink(Config.api, Config.provider_lootlabs_id, Config.service_lootlabs_id)) Rayfield:Notify({Title="Copied", Content="Link Copied", Duration=2}) end})
+    Tab:CreateButton({Name = "Get Key (WorkInk)", Callback = function() setclipboard(JunkieKeySystem.getLink(Config.api, Config.provider_workink_id, Config.service_workink_id)) Rayfield:Notify({Title="Copied", Content="Link Copied", Duration=2}) end})
+    Tab:CreateButton({Name = "Buy Premium", Callback = function() setclipboard(Config.discord_invite) Rayfield:Notify({Title="Copied", Content="Discord Link Copied", Duration=2}) end})
 end
 
 repeat task.wait() until IsLoggedIn
 task.spawn(function() SendWebhook(IsPremium and "Premium" or "Free") end)
 
-local s, Rayfield = pcall(function() return loadstring(game:HttpGet('https://sirius.menu/rayfield'))() end)
-if not s then return end
+--------------------------------------------------------------------------------------
+-- [ 5. MAIN GAME SCRIPT (V24) ]
+--------------------------------------------------------------------------------------
+local success_main, Rayfield = pcall(function() return loadstring(game:HttpGet('https://sirius.menu/rayfield'))() end)
+if not success_main then return end
 
-local Window = Rayfield:CreateWindow({Name="Mental Hub", LoadingTitle="Fishies OP Script", LoadingSubtitle=IsPremium and "Premium" or "Free", ConfigurationSaving={Enabled=false}})
-local Players, RS, UIS, RepS, TP = game:GetService("Players"), game:GetService("RunService"), game:GetService("UserInputService"), game:GetService("ReplicatedStorage"), game:GetService("TeleportService")
-local LP, Remotes = Players.LocalPlayer, RepS:WaitForChild("rbxts_include"):WaitForChild("node_modules"):WaitForChild("@rbxts"):WaitForChild("remo"):WaitForChild("src"):WaitForChild("container")
-local TS_Lists = RepS:FindFirstChild("TS") and RepS.TS:FindFirstChild("lists")
+local Window = Rayfield:CreateWindow({
+   Name = "Mental Hub",
+   LoadingTitle = "Fishies OP Script",
+   LoadingSubtitle = IsPremium and "Premium Edition" or "Free Edition",
+   ConfigurationSaving = { Enabled = false },
+   KeySystem = false
+})
 
-local DebugMode, CharVars = true, {WalkSpeed=16, WS=false, InfJump=false, Fly=false, FlySpd=1, Noclip=false, AntiAFK=true, AntiStaff=true}
-local Loops, Selections, Settings = {Egg=false, Gear=false, Bait=false, Event=false, Merch=false, Collect=false, Sac=false, Crate=false, Sell=false, EvSell=false, Hatch=false}, {Eggs={}, Gears={}, Baits={}, Events={}, Merch={}}, {SellD=300, EvSellD=300, CollD=10}
-local UUID_Queue, Processed_IDs = {}, {}
+Rayfield:Notify({Title = "Welcome", Content = IsPremium and "Instant Hatch Active 👑" or "Free Mode Active", Duration = 5, Image = 4483362458})
 
-local function RecurseUUID(d) if type(d)=="table" then for k,v in pairs(d) do if type(k)=="string" and k:match("%x%x%x%x%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%x%x%x%x%x%x%x%x") and not Processed_IDs[k] then table.insert(UUID_Queue, k); Processed_IDs[k]=true end if type(v)=="string" and v:match("%x%x%x%x%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%x%x%x%x%x%x%x%x") and not Processed_IDs[v] then table.insert(UUID_Queue, v); Processed_IDs[v]=true end if type(v)=="table" then RecurseUUID(v) end end elseif type(d)=="string" and d:match("%x%x%x%x%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%x%x%x%x%x%x%x%x") and not Processed_IDs[d] then table.insert(UUID_Queue, d); Processed_IDs[d]=true end end
-for _,r in pairs(Remotes:GetDescendants()) do if r:IsA("RemoteEvent") and (r.Name:find("state") or r.Name:find("replecs") or r.Name:find("sync")) and not (r.Name:find("fish") or r.Name:find("weather")) then r.OnClientEvent:Connect(function(...) RecurseUUID({...}) end) end end
+-- [ SERVICES & VARS ]
+local Players, RunService, UserInputService = game:GetService("Players"), game:GetService("RunService"), game:GetService("UserInputService")
+local ReplicatedStorage, TeleportService = game:GetService("ReplicatedStorage"), game:GetService("TeleportService")
+local LocalPlayer = Players.LocalPlayer
+local RemoteContainer = ReplicatedStorage:WaitForChild("rbxts_include"):WaitForChild("node_modules"):WaitForChild("@rbxts"):WaitForChild("remo"):WaitForChild("src"):WaitForChild("container")
+local TS_Lists = ReplicatedStorage:FindFirstChild("TS") and ReplicatedStorage.TS:FindFirstChild("lists")
 
-local function Loop(n, f) Loops[n]=true; task.spawn(function() while Loops[n] do f() end end) end
-local function Buy(r, i) pcall(function() Remotes[r]:FireServer(i) end) end
-
-local Main = Window:CreateTab("Main")
-Main:CreateDropdown({Name="Eggs", Options={"Starter","Novice","Forest","Polar","Tropical","Exotic"}, MultipleOptions=true, Callback=function(v) Selections.Eggs=v end})
-Main:CreateToggle({Name="Auto Buy Eggs", Callback=function(v) Loops.Egg=v if v then Loop("Egg", function() for _,i in ipairs(Selections.Eggs) do if not Loops.Egg then break end Buy("shop.purchaseEgg", i) end task.wait(0.2) end) end end})
-
-if IsPremium then
-    Main:CreateToggle({Name="Auto Instant Hatch 👑", Callback=function(v) Loops.Hatch=v if v then Loop("Hatch", function() if #UUID_Queue>0 then local id=table.remove(UUID_Queue,1); task.spawn(function() pcall(function() Remotes["pets.hatchEgg"]:InvokeServer(id) end) end); Buy("pets.hatchEgg", id); task.wait(0.05) else task.wait(0.5) end end) end end})
-else
-    Main:CreateButton({Name="Auto Instant Hatch [LOCKED] 🔒", Callback=function() Rayfield:Notify({Title="Premium", Content="Buy Lifetime Key!", Duration=2}) end})
+-- [ STEALTH DEBUG ]
+local DebugMode = true 
+local function DebugPrint(msg)
+    if DebugMode then
+        -- ONLY PRINT ERRORS
+        if msg:find("Error") or msg:find("Failed") or msg:find("Critical") then
+            warn("MentalHub: " .. msg)
+        end
+    end
 end
 
--- Add other tabs (Gear, Bait, etc) similarly compressed if needed, keeping core logic.
--- Character Logic
-task.spawn(function() while task.wait(0.5) do if CharVars.WS and LP.Character and LP.Character:FindFirstChild("Humanoid") then LP.Character.Humanoid.WalkSpeed=CharVars.WalkSpeed end end end)
-UIS.JumpRequest:Connect(function() if CharVars.InfJump and LP.Character then LP.Character:FindFirstChildOfClass('Humanoid'):ChangeState("Jumping") end end)
+local CharacterVars = {WalkSpeed = 16, WS_Enabled = false, InfJump_Enabled = false, Fly_Enabled = false, Fly_Speed = 1, Noclip_Enabled = false, AntiAFK = true, AntiStaff = true}
 
-local Char = Window:CreateTab("Character")
-Char:CreateToggle({Name="WalkSpeed", Callback=function(v) CharVars.WS=v end})
-Char:CreateSlider({Name="Speed", Range={16,100}, Increment=1, CurrentValue=16, Callback=function(v) CharVars.WalkSpeed=v end})
-Char:CreateToggle({Name="Inf Jump", Callback=function(v) CharVars.InfJump=v end})
+-- [ FUNCTIONS ]
+local FlyBodyGyro, FlyBodyVelocity
+local function StartFly() -- Fly V6
+    local char = LocalPlayer.Character
+    if not char or not char:FindFirstChild("HumanoidRootPart") then return end
+    local root, human = char.HumanoidRootPart, char.Humanoid
+    if FlyBodyGyro then FlyBodyGyro:Destroy() end
+    if FlyBodyVelocity then FlyBodyVelocity:Destroy() end
+    
+    FlyBodyGyro = Instance.new("BodyGyro", root)
+    FlyBodyGyro.P = 9e4
+    FlyBodyGyro.maxTorque = Vector3.new(9e9, 9e9, 9e9)
+    FlyBodyGyro.cframe = root.CFrame
+    FlyBodyVelocity = Instance.new("BodyVelocity", root)
+    FlyBodyVelocity.velocity = Vector3.new(0, 0, 0)
+    FlyBodyVelocity.maxForce = Vector3.new(9e9, 9e9, 9e9)
+
+    repeat task.wait()
+        if not CharacterVars.Fly_Enabled or not human then break end
+        human.PlatformStand = true
+        local cam = workspace.CurrentCamera
+        local moveDir = human.MoveDirection
+        local speed = CharacterVars.Fly_Speed * 50
+        
+        if moveDir.Magnitude > 0 then
+            local look, right = cam.CFrame.LookVector, cam.CFrame.RightVector
+            local fwdDot = moveDir:Dot(look * Vector3.new(1,0,1))
+            local rightDot = moveDir:Dot(right * Vector3.new(1,0,1))
+            FlyBodyVelocity.velocity = (look * fwdDot * speed) + (right * rightDot * speed)
+        else
+            FlyBodyVelocity.velocity = Vector3.new(0,0,0)
+        end
+        FlyBodyGyro.cframe = cam.CFrame
+    until not CharacterVars.Fly_Enabled
+    if human then human.PlatformStand = false end
+    if FlyBodyGyro then FlyBodyGyro:Destroy() end
+    if FlyBodyVelocity then FlyBodyVelocity:Destroy() end
+end
+
+local NoclipLoop
+local function ToggleNoclip(v)
+    if v then
+        NoclipLoop = RunService.Stepped:Connect(function()
+            if LocalPlayer.Character then
+                for _, p in pairs(LocalPlayer.Character:GetChildren()) do
+                    if p:IsA("BasePart") and p.CanCollide then p.CanCollide = false end
+                end
+            end
+        end)
+    elseif NoclipLoop then NoclipLoop:Disconnect() end
+end
+
+task.spawn(function() while task.wait(0.5) do if CharacterVars.WS_Enabled and LocalPlayer.Character then LocalPlayer.Character.Humanoid.WalkSpeed = CharacterVars.WalkSpeed end end end)
+UserInputService.JumpRequest:Connect(function() if CharacterVars.InfJump_Enabled and LocalPlayer.Character then LocalPlayer.Character.Humanoid:ChangeState("Jumping") end end)
+LocalPlayer.Idled:Connect(function() if CharacterVars.AntiAFK then game:GetService("VirtualUser"):CaptureController(); game:GetService("VirtualUser"):ClickButton2(Vector2.new()) end end)
+Players.PlayerAdded:Connect(function(p) if CharacterVars.AntiStaff and (p:GetRankInGroup(game.CreatorId)>0 or p:IsFriendsWith(game.CreatorId)) then Rayfield:Notify({Title="WARNING", Content="Staff Joined: "..p.Name, Duration=10}) end end)
+
+local MasterShops = {Egg={"Starter","Novice","Forest","Polar","Tropical","Exotic"}, Event={"Atlantis Egg","Atlantis Crate","Trident Throne","Poseidon Statue","Kings Throne","Atlantis Lightpole","Atlantis Banner"}, Merchant={"Zoo","Wild","Punk","Boba","Ashen"}, Gear={}, Bait={}}
+local function ScanAutoData()
+    if not TS_Lists then return end
+    local gf = TS_Lists:FindFirstChild("game")
+    if gf then
+        local bf = gf:FindFirstChild("bait-packs.list") or gf:FindFirstChild("bait-packs") or gf:FindFirstChild("bait")
+        if bf then local s,d=pcall(require, bf) if s and d then for i,v in pairs(d.Baits or d.BaitPacks) do if v.source == "BaitShop" or v.source == (d.BaitSource or {}).BaitShop then if not table.find(MasterShops.Bait, i) then table.insert(MasterShops.Bait, i) end end end end end
+    end
+    for _,m in ipairs(TS_Lists:GetDescendants()) do if m:IsA("ModuleScript") then local s,d=pcall(require, m) if s and d and d.Gears then for i,v in pairs(d.Gears) do if v.source == "GearShop" or v.source == (d.GearSource or {}).GearShop then if not table.find(MasterShops.Gear, i) then table.insert(MasterShops.Gear, i) end end end end end end
+    table.sort(MasterShops.Gear); table.sort(MasterShops.Bait)
+end
+ScanAutoData()
+
+local function FilterList(l, q) if q=="" then return l end local f={} for _,i in ipairs(l) do if i:lower():find(q:lower()) then table.insert(f,i) end end return f end
+
+local Loops, Selections, Settings = {Egg=false, Gear=false, Bait=false, Event=false, Merch=false, Collect=false, Sac=false, Crate=false, Sell=false, EvSell=false, Hatch=false}, {Eggs={}, Gears={}, Baits={}, Events={}, Merch={}}, {SellDelay=300, EventSellDelay=300, CollectDelay=10}
+local UUID_Queue, Processed_IDs = {}, {}
+
+local function recursiveFindUUID(d)
+    if type(d)=="table" then for k,v in pairs(d) do if type(k)=="string" and k:match("%x%x%x%x%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%x%x%x%x%x%x%x%x") and not Processed_IDs[k] then table.insert(UUID_Queue, k); Processed_IDs[k]=true end if type(v)=="string" and v:match("%x%x%x%x%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%x%x%x%x%x%x%x%x") and not Processed_IDs[v] then table.insert(UUID_Queue, v); Processed_IDs[v]=true end if type(v)=="table" then recursiveFindUUID(v) end end elseif type(d)=="string" and d:match("%x%x%x%x%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%x%x%x%x%x%x%x%x") and not Processed_IDs[d] then table.insert(UUID_Queue, d); Processed_IDs[d]=true end
+end
+
+getgenv().GardenConnections = getgenv().GardenConnections or {}
+for _,c in ipairs(getgenv().GardenConnections) do c:Disconnect() end
+getgenv().GardenConnections = {}
+
+for _,r in pairs(RemoteContainer:GetDescendants()) do
+    if r:IsA("RemoteEvent") and (r.Name:find("state") or r.Name:find("replecs") or r.Name:find("sync")) and not (r.Name:find("fish") or r.Name:find("weather")) then
+        local c = r.OnClientEvent:Connect(function(...) recursiveFindUUID({...}) end)
+        table.insert(getgenv().GardenConnections, c)
+    end
+end
+
+getgenv().GardenLoops = getgenv().GardenLoops or {}
+for _,t in ipairs(getgenv().GardenLoops) do task.cancel(t) end
+getgenv().GardenLoops = {}
+
+local function AddLoop(f) local t = task.spawn(f); table.insert(getgenv().GardenLoops, t) end
+local function SafeBuy(r, i) pcall(function() RemoteContainer[r]:FireServer(i) end) end
+
+local function ToggleHatchListener(v)
+    Loops.Hatch = v
+    if v then
+        AddLoop(function()
+            while Loops.Hatch do
+                if #UUID_Queue > 0 then
+                    local id = table.remove(UUID_Queue, 1)
+                    if not RemoteContainer:FindFirstChild("pets.hatchEgg") then DebugPrint("Critical Error: Hatch Remote Missing") end
+                    task.spawn(function() 
+                        local s,e = pcall(function() RemoteContainer["pets.hatchEgg"]:InvokeServer(id) end) 
+                        if not s then DebugPrint("Sync Error: "..tostring(e)) end
+                    end)
+                    task.spawn(function() pcall(function() RemoteContainer["pets.hatchEgg"]:FireServer(id) end) end)
+                    task.wait(0.05)
+                else
+                    task.wait(0.5)
+                end
+            end
+        end)
+    end
+end
+
+-- [ TABS ]
+local MainTab = Window:CreateTab("Main")
+local EggDrop
+MainTab:CreateSection("Egg Shop")
+MainTab:CreateInput({Name="Search", PlaceholderText="Filter...", RemoveTextAfterFocusLost=false, Callback=function(t) EggDrop:Refresh(FilterList(MasterShops.Egg, t), true) end})
+EggDrop = MainTab:CreateDropdown({Name="Eggs", Options=MasterShops.Egg, MultipleOptions=true, Callback=function(v) Selections.Eggs=v end})
+MainTab:CreateToggle({Name="Auto Buy Eggs", Callback=function(v) Loops.Egg=v if v then AddLoop(function() while Loops.Egg do for _,i in ipairs(Selections.Eggs) do if not Loops.Egg then break end SafeBuy("shop.purchaseEgg", i) end task.wait(0.2) end end) end end})
+
+MainTab:CreateSection("Egg Hatcher")
+if IsPremium then
+    MainTab:CreateToggle({Name="Auto Instant Hatch 👑", Callback=ToggleHatchListener})
+else
+    MainTab:CreateButton({Name="Auto Instant Hatch [PREMIUM LOCKED] 🔒", Callback=function() Rayfield:Notify({Title="Premium Only", Content="Join Discord for Lifetime Key", Duration=2}) end})
+end
+
+MainTab:CreateSection("Gear Shop")
+local GearDrop
+MainTab:CreateInput({Name="Search", PlaceholderText="Filter...", RemoveTextAfterFocusLost=false, Callback=function(t) GearDrop:Refresh(FilterList(MasterShops.Gear, t), true) end})
+GearDrop = MainTab:CreateDropdown({Name="Gears", Options=MasterShops.Gear, MultipleOptions=true, Callback=function(v) Selections.Gears=v end})
+MainTab:CreateToggle({Name="Auto Buy Gears", Callback=function(v) Loops.Gear=v if v then AddLoop(function() while Loops.Gear do for _,i in ipairs(Selections.Gears) do if not Loops.Gear then break end SafeBuy("shop.purchaseGear", i) end task.wait(0.1) end end) end end})
+
+MainTab:CreateSection("Bait Shop")
+local BaitDrop
+MainTab:CreateInput({Name="Search", PlaceholderText="Filter...", RemoveTextAfterFocusLost=false, Callback=function(t) BaitDrop:Refresh(FilterList(MasterShops.Bait, t), true) end})
+BaitDrop = MainTab:CreateDropdown({Name="Baits", Options=MasterShops.Bait, MultipleOptions=true, Callback=function(v) Selections.Baits=v end})
+MainTab:CreateToggle({Name="Auto Buy Baits", Callback=function(v) Loops.Bait=v if v then AddLoop(function() while Loops.Bait do for _,i in ipairs(Selections.Baits) do if not Loops.Bait then break end SafeBuy("shop.purchaseBait", i) end task.wait(0.1) end end) end end})
+
+local EventTab = Window:CreateTab("Event Shop")
+local EvDrop
+EventTab:CreateInput({Name="Search", PlaceholderText="Filter...", RemoveTextAfterFocusLost=false, Callback=function(t) EvDrop:Refresh(FilterList(MasterShops.Event, t), true) end})
+EvDrop = EventTab:CreateDropdown({Name="Event Items", Options=MasterShops.Event, MultipleOptions=true, Callback=function(v) Selections.Events=v end})
+EventTab:CreateToggle({Name="Auto Buy Event", Callback=function(v) Loops.Event=v if v then AddLoop(function() while Loops.Event do for _,i in ipairs(Selections.Events) do if not Loops.Event then break end if i:find("Egg") then pcall(function() RemoteContainer["shop.purchaseEventItem"]:FireServer("egg:Atlantis") end) elseif i:find("Crate") then SafeBuy("shop.purchaseEventItem", "baitpack:Atlantis") else SafeBuy("shop.purchaseEventItem", i) end end task.wait(0.2) end end) end end})
+EventTab:CreateSection("Actions")
+EventTab:CreateToggle({Name="Auto Sacrifice", Callback=function(v) Loops.Sac=v if v then AddLoop(function() while Loops.Sac do pcall(function() RemoteContainer["sellFish.sacrificeAllFish"]:FireServer() end) task.wait(1) end end) end end})
+EventTab:CreateToggle({Name="Auto Sell Event Fish", Callback=function(v) Loops.EvSell=v if v then AddLoop(function() while Loops.EvSell do pcall(function() RemoteContainer["sellFish.sellAllEventFish"]:FireServer() end) task.wait(Settings.EventSellDelay) end end) end end})
+EventTab:CreateSlider({Name="Event Sell Delay", Range={30,1800}, Increment=10, CurrentValue=300, Callback=function(v) Settings.EventSellDelay=v end})
+EventTab:CreateToggle({Name="Auto Open Crate", Callback=function(v) Loops.Crate=v if v then AddLoop(function() while Loops.Crate do pcall(function() RemoteContainer["store.openBaitPack"]:FireServer("Atlantis:normal") end) task.wait(0.05) end end) end end})
+
+local MerchTab = Window:CreateTab("Merchant")
+local MerchDrop
+MerchTab:CreateInput({Name="Search", PlaceholderText="Filter...", RemoveTextAfterFocusLost=false, Callback=function(t) MerchDrop:Refresh(FilterList(MasterShops.Merchant, t), true) end})
+MerchDrop = MerchTab:CreateDropdown({Name="Items", Options=MasterShops.Merchant, MultipleOptions=true, Callback=function(v) Selections.Merch=v end})
+MerchTab:CreateToggle({Name="Auto Buy", Callback=function(v) Loops.Merch=v if v then AddLoop(function() while Loops.Merch do for _,i in ipairs(Selections.Merch) do if not Loops.Merch then break end pcall(function() RemoteContainer["merchant.purchaseItem"]:FireServer("travelling", i) end) end task.wait(0.5) end end) end end})
+
+local MiscTab = Window:CreateTab("Misc")
+MiscTab:CreateToggle({Name="Auto Collect Gears", Callback=function(v) Loops.Collect=v if v then AddLoop(function() while Loops.Collect do pcall(function() RemoteContainer["crafting.collectCraft"]:FireServer("gear") end) task.wait(Settings.CollectDelay) end end) end end})
+MiscTab:CreateSlider({Name="Collect Delay", Range={1,30}, Increment=1, CurrentValue=10, Callback=function(v) Settings.CollectDelay=v end})
+MiscTab:CreateToggle({Name="Auto Sell Fish", Callback=function(v) Loops.Sell=v if v then AddLoop(function() while Loops.Sell do pcall(function() RemoteContainer["sellFish.sellAllFish"]:FireServer() end) task.wait(Settings.SellDelay) end end) end end})
+MiscTab:CreateSlider({Name="Sell Delay", Range={30,1800}, Increment=10, CurrentValue=300, Callback=function(v) Settings.SellDelay=v end})
+
+local CharTab = Window:CreateTab("Character")
+CharTab:CreateSection("Movement")
+CharTab:CreateToggle({Name="Enable WalkSpeed", Callback=function(v) CharacterVars.WS_Enabled=v end})
+CharTab:CreateSlider({Name="Speed", Range={16,100}, Increment=1, CurrentValue=16, Callback=function(v) CharacterVars.WalkSpeed=v end})
+CharTab:CreateToggle({Name="Infinite Jump", Callback=function(v) CharacterVars.InfJump_Enabled=v end})
+CharTab:CreateSection("Utilities")
+CharTab:CreateToggle({Name="Fly V3", Callback=function(v) CharacterVars.Fly_Enabled=v if v then StartFly() end end})
+CharTab:CreateSlider({Name="Fly Speed", Range={1,10}, Increment=0.5, CurrentValue=1, Callback=function(v) CharacterVars.Fly_Speed=v end})
+CharTab:CreateToggle({Name="Noclip", Callback=ToggleNoclip})
+CharTab:CreateSection("Protection")
+CharTab:CreateToggle({Name="Anti-AFK", CurrentValue=true, Callback=function(v) CharacterVars.AntiAFK=v end})
+CharTab:CreateToggle({Name="Anti-Staff", CurrentValue=true, Callback=function(v) CharacterVars.AntiStaff=v end})
+CharTab:CreateButton({Name="Anti-Lag", Callback=function() for _,v in pairs(workspace:GetDescendants()) do if v:IsA("BasePart") and not v.Parent:FindFirstChild("Humanoid") then v.Material=Enum.Material.SmoothPlastic; v.Reflectance=0 elseif v:IsA("Decal") or v:IsA("Texture") then v:Destroy() end end Rayfield:Notify({Title="Success", Content="FPS Boosted", Duration=2}) end})
+CharTab:CreateSection("Server")
+CharTab:CreateButton({Name="Rejoin", Callback=function() TeleportService:Teleport(game.PlaceId, LocalPlayer) end})
+CharTab:CreateButton({Name="Server Hop", Callback=function() local s=game:GetService("HttpService"):JSONDecode(game:HttpGet("https://games.roblox.com/v1/games/"..game.PlaceId.."/servers/Public?sortOrder=Asc&limit=100")); for _,v in pairs(s.data) do if v.playing~=v.maxPlayers then TeleportService:TeleportToPlaceInstance(game.PlaceId, v.id, LocalPlayer) break end end end})
+CharTab:CreateInput({Name="Join Job ID", PlaceholderText="Paste Job ID...", Callback=function(t) TeleportService:TeleportToPlaceInstance(game.PlaceId, t, LocalPlayer) end})
+
+local ConfigTab = Window:CreateTab("Configuration")
+local ConfigName, ConfigFolder, AutoFile = "", "MentalHub", "autoload.txt"
+local function GetConfigs() local f={} for _,v in ipairs(listfiles(ConfigFolder)) do if not v:find(AutoFile) then table.insert(f, v:match("([^\\/]+).json$")) end end return f end
+local function LoadCfg(n) local p=ConfigFolder.."/"..n..".json" if isfile(p) then local d=game:GetService("HttpService"):JSONDecode(readfile(p)) if d then Selections=d.Selections; Settings=d.Settings; Loops=d.Loops; return true end end return false end
+
+local CfgDrop = ConfigTab:CreateDropdown({Name="Configs", Options=GetConfigs(), Callback=function(v) if type(v)=="table" then ConfigName=v[1] else ConfigName=v end end})
+ConfigTab:CreateInput({Name="Name", PlaceholderText="Config Name...", Callback=function(t) ConfigName=t end})
+ConfigTab:CreateButton({Name="Save", Callback=function() if ConfigName~="" then writefile(ConfigFolder.."/"..ConfigName..".json", game:GetService("HttpService"):JSONEncode({Selections=Selections,Settings=Settings,Loops=Loops})) CfgDrop:Refresh(GetConfigs(), true) end end})
+ConfigTab:CreateButton({Name="Load", Callback=function() if ConfigName~="" and LoadCfg(ConfigName) then Rayfield:Notify({Title="Loaded", Content="Config Loaded", Duration=2}) end end})
+ConfigTab:CreateButton({Name="Delete", Callback=function() if ConfigName~="" and isfile(ConfigFolder.."/"..ConfigName..".json") then delfile(ConfigFolder.."/"..ConfigName..".json") CfgDrop:Refresh(GetConfigs(), true) end end})
+ConfigTab:CreateSection("System")
+ConfigTab:CreateButton({Name="Unload Script", Callback=function() Rayfield:Destroy(); for _,t in ipairs(getgenv().GardenLoops) do task.cancel(t) end; getgenv().GardenLoops={} end})
+if isfile(ConfigFolder.."/"..AutoFile) then LoadCfg(readfile(ConfigFolder.."/"..AutoFile)) end
 
 Rayfield:LoadConfiguration()
+print("MENTALHUB LOADED")
