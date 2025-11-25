@@ -26,7 +26,6 @@ local Config = {
     discord_invite = "https://discord.gg/QA2yHSuTjw", 
     game_id = 91296119701853,
     
-    -- FOLDER SETTINGS (KEPT SAME)
     folder = "MentalHub", 
     key_file = "LicenseKey.txt",
     
@@ -389,7 +388,9 @@ EvDrop = EventTab:CreateDropdown({Name="Event Items", Options=MasterShops.Event,
 Toggles.Event = EventTab:CreateToggle({Name="Auto Buy Event", Callback=function(v) Loops.Event=v if v then AddLoop(function() while Loops.Event do for _,i in ipairs(Selections.Events) do if not Loops.Event then break end if i:find("Egg") then pcall(function() RemoteContainer["shop.purchaseEventItem"]:FireServer("egg:Atlantis") end) elseif i:find("Crate") then SafeBuy("shop.purchaseEventItem", "baitpack:Atlantis") else SafeBuy("shop.purchaseEventItem", i) end end task.wait(0.2) end end) end end})
 EventTab:CreateSection("Actions")
 Toggles.Sacrifice = EventTab:CreateToggle({Name="Auto Sacrifice", Callback=function(v) Loops.Sac=v if v then AddLoop(function() while Loops.Sac do pcall(function() RemoteContainer["sellFish.sacrificeAllFish"]:FireServer() end) task.wait(1) end end) end end})
+EventTab:CreateButton({Name="Sacrifice All (Manual)", Callback=function() pcall(function() RemoteContainer["sellFish.sacrificeAllFish"]:FireServer() end) Rayfield:Notify({Title="Action", Content="Sacrificed All Fish", Duration=2}) end})
 Toggles.EventSell = EventTab:CreateToggle({Name="Auto Sell Event Fish", Callback=function(v) Loops.EvSell=v if v then AddLoop(function() while Loops.EvSell do pcall(function() RemoteContainer["sellFish.sellAllEventFish"]:FireServer() end) task.wait(Settings.EventSellDelay) end end) end end})
+EventTab:CreateButton({Name="Sell Event Fish (Manual)", Callback=function() pcall(function() RemoteContainer["sellFish.sellAllEventFish"]:FireServer() end) Rayfield:Notify({Title="Action", Content="Sold All Event Fish", Duration=2}) end})
 EventTab:CreateSlider({Name="Event Sell Delay", Range={30,1800}, Increment=10, CurrentValue=300, Callback=function(v) Settings.EventSellDelay=v end})
 Toggles.Crate = EventTab:CreateToggle({Name="Auto Open Crate", Callback=function(v) Loops.Crate=v if v then AddLoop(function() while Loops.Crate do pcall(function() RemoteContainer["store.openBaitPack"]:FireServer("Atlantis:normal") end) task.wait(0.05) end end) end end})
 
@@ -403,6 +404,7 @@ local MiscTab = Window:CreateTab("Misc")
 Toggles.Collect = MiscTab:CreateToggle({Name="Auto Collect Gears", Callback=function(v) Loops.Collect=v if v then AddLoop(function() while Loops.Collect do pcall(function() RemoteContainer["crafting.collectCraft"]:FireServer("gear") end) task.wait(Settings.CollectDelay) end end) end end})
 MiscTab:CreateSlider({Name="Collect Delay", Range={1,30}, Increment=1, CurrentValue=10, Callback=function(v) Settings.CollectDelay=v end})
 Toggles.Sell = MiscTab:CreateToggle({Name="Auto Sell Fish", Callback=function(v) Loops.Sell=v if v then AddLoop(function() while Loops.Sell do pcall(function() RemoteContainer["sellFish.sellAllFish"]:FireServer() end) task.wait(Settings.SellDelay) end end) end end})
+MiscTab:CreateButton({Name="Sell All Fish (Manual)", Callback=function() pcall(function() RemoteContainer["sellFish.sellAllFish"]:FireServer() end) Rayfield:Notify({Title="Action", Content="Sold All Fish", Duration=2}) end})
 MiscTab:CreateSlider({Name="Sell Delay", Range={30,1800}, Increment=10, CurrentValue=300, Callback=function(v) Settings.SellDelay=v end})
 
 local CharTab = Window:CreateTab("Character")
@@ -420,7 +422,14 @@ CharTab:CreateToggle({Name="Anti-Staff", CurrentValue=true, Callback=function(v)
 CharTab:CreateButton({Name="Anti-Lag", Callback=function() for _,v in pairs(workspace:GetDescendants()) do if v:IsA("BasePart") and not v.Parent:FindFirstChild("Humanoid") then v.Material=Enum.Material.SmoothPlastic; v.Reflectance=0 elseif v:IsA("Decal") or v:IsA("Texture") then v:Destroy() end end Rayfield:Notify({Title="Success", Content="FPS Boosted", Duration=2}) end})
 CharTab:CreateSection("Server")
 CharTab:CreateButton({Name="Rejoin", Callback=function() TeleportService:Teleport(game.PlaceId, LocalPlayer) end})
-CharTab:CreateButton({Name="Server Hop", Callback=function() local s=game:GetService("HttpService"):JSONDecode(game:HttpGet("https://games.roblox.com/v1/games/"..game.PlaceId.."/servers/Public?sortOrder=Asc&limit=100")); for _,v in pairs(s.data) do if v.playing~=v.maxPlayers then TeleportService:TeleportToPlaceInstance(game.PlaceId, v.id, LocalPlayer) break end end end})
+CharTab:CreateButton({Name="Server Hop", Callback=function() 
+    local success, servers = pcall(function() return game:GetService("HttpService"):JSONDecode(game:HttpGet("https://games.roblox.com/v1/games/"..game.PlaceId.."/servers/Public?sortOrder=Asc&limit=100")) end)
+    if success and servers and servers.data then
+        for _,v in pairs(servers.data) do if v.playing~=v.maxPlayers then TeleportService:TeleportToPlaceInstance(game.PlaceId, v.id, LocalPlayer) break end end
+    else
+        Rayfield:Notify({Title="Error", Content="Failed to fetch servers", Duration=3})
+    end
+end})
 CharTab:CreateInput({Name="Join Job ID", PlaceholderText="Paste Job ID...", Callback=function(t) TeleportService:TeleportToPlaceInstance(game.PlaceId, t, LocalPlayer) end})
 
 -- [ CONFIGURATION SYSTEM ]
