@@ -829,4 +829,4 @@ ConfigTab:CreateSection("Info")
 ConfigTab:CreateButton({ Name = "Copy Discord Link", Callback = function() setclipboard(Config.discord_invite) Rayfield:Notify({Title="Success", Content="Discord link copied!", Duration=2.5}) end })
 
 Rayfield:LoadConfiguration()
-print("MENTALHUB V24 LOADED")
+print("MENTALHUB V1 LOADED")
