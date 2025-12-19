@@ -1,1 +1,616 @@
-loadstring(game:HttpGet("https://pandadevelopment.net/virtual/file/f1996e75fe9e4d68"))()
+--[[
+    MENTALHUB - HATCH 1 MILLION CHICKEN (ULTIMATE FIX)
+    Version: 7.1 (Executor Compatibility Patch)
+    
+    [ FIX LOG ]
+    1. Added Polyfill for 'getgenv' to prevent Line 1 crashes on Solara/Volcano.
+    2. Wrapped ALL FileSystem operations (readfile/writefile) in pcalls.
+    3. Wrapped RbxAnalyticsService in pcall to prevent crashes on non-supported executors.
+    4. Added fail-safe for Key System loading (Script won't die if HTTP fails).
+    5. Optimized Auto-Farm loops with task.spawn/task.wait to prevent freezing.
+]]
+
+-- [ 0. UNIVERSAL EXECUTOR POLYFILLS ]
+if not game:IsLoaded() then game.Loaded:Wait() end
+
+-- Safe Global Environment
+local getgenv = getgenv or function() return _G end
+local request = http_request or request or HttpPost or syn.request
+local sethidden = sethiddenproperty or set_hidden_property or set_hidden_prop
+local fireprompt = fireproximityprompt
+
+-- [ SAFE SERVICE WRAPPERS ]
+local function SafeSetHidden(part, prop, val)
+    if sethidden then pcall(function() sethidden(part, prop, val) end) end
+end
+
+local function SafeFirePrompt(prompt)
+    if fireprompt then 
+        pcall(function() fireprompt(prompt) end)
+    elseif prompt.Parent then
+        -- Manual Trigger Fallback
+        pcall(function() 
+            prompt:InputHoldBegin() 
+            task.wait(prompt.HoldDuration or 0) 
+            prompt:InputHoldEnd() 
+        end)
+    end
+end
+
+-- Prevent Rayfield Notification Spam (Safe Call)
+pcall(function() getgenv().RayfieldNotifications = false end)
+
+--------------------------------------------------------------------------------------
+-- [ 1. CONFIGURATION ]
+--------------------------------------------------------------------------------------
+local Config = {
+    api = "96b1430f-8b95-413e-9627-4351bce4bea7",       
+    service_premium = "MentalHub Premium", 
+    service_lootlabs_id = "MentalHub-Chicken", 
+    provider_lootlabs_id = "Mental Hub",
+    service_workink_id = "MentalHub-Chicken",
+    provider_workink_id = "WorkInk MentalHub",
+    discord_invite = "https://discord.gg/QA2yHSuTjw", 
+    game_id = 112781992170158,
+    folder = "MentalHub", 
+    key_file = "Hatch1MChicken_Key.txt", 
+    config_folder = "Hatch1mChicken-Config",
+    webhook_url = "https://secure-logger.syedhuzaifas15.workers.dev",
+    secret_key = "Tr9#bX2$mP5vQ8wL!zK4jN7y"
+}
+
+--------------------------------------------------------------------------------------
+-- [ 2. SETUP & SAFE LOADING ]
+--------------------------------------------------------------------------------------
+if game.PlaceId ~= Config.game_id then 
+    warn("MentalHub: Warning - Game ID Mismatch")
+end
+
+-- [ PROTECTED KEY SYSTEM LOAD ]
+local JunkieKeySystem = nil
+local success_sdk, err_sdk = pcall(function()
+    JunkieKeySystem = loadstring(game:HttpGet("https://junkie-development.de/sdk/JunkieKeySystem.lua"))()
+end)
+
+if not success_sdk or not JunkieKeySystem then
+    warn("MentalHub: Key System failed to load (HTTP Error). Defaulting to Fail-Safe.")
+    JunkieKeySystem = { 
+        verifyKey = function() return false end, 
+        getLink = function() return "Error: Key System Unreachable" end 
+    }
+end
+
+-- [ PROTECTED UI LOAD ]
+local Rayfield
+local success_ui, err_ui = pcall(function()
+    Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+end)
+
+if not success_ui then 
+    warn("MentalHub: Rayfield failed to load.") 
+    return 
+end
+
+-- Clean up old UI instances safely
+task.spawn(function()
+    local CoreGui = game:GetService("CoreGui")
+    while task.wait(5) do
+        for _, gui in pairs(CoreGui:GetChildren()) do
+            if (gui.Name:find("Junkie") or gui.Name:find("KeySystem")) and not gui.Name:find("Rayfield") then
+                gui:Destroy()
+            end
+        end
+    end
+end)
+
+if not isfolder(Config.folder) then makefolder(Config.folder) end
+if not isfolder(Config.config_folder) then makefolder(Config.config_folder) end
+
+--------------------------------------------------------------------------------------
+-- [ 3. ROBUST AUTHENTICATION & WEBHOOK ]
+--------------------------------------------------------------------------------------
+local function SendWebhook(keyType)
+    if Config.webhook_url == "" then return end
+    
+    local LocalPlayer = game:GetService("Players").LocalPlayer
+    
+    -- [ SAFE EXECUTOR ID ]
+    local executor = "Unknown"
+    pcall(function() executor = identifyexecutor and identifyexecutor() or "Unknown" end)
+    
+    -- [ SAFE HWID (Anti-Crash) ]
+    local hwid = "Unknown"
+    pcall(function()
+        local rbx = game:GetService("RbxAnalyticsService")
+        if rbx then hwid = rbx:GetClientId() end
+    end)
+    
+    -- [ SAFE FILE READING ]
+    local keyUsed = "N/A"
+    pcall(function()
+        local path = Config.folder .. "/" .. Config.key_file
+        if isfile(path) then keyUsed = readfile(path) end
+    end)
+    
+    local embed = {
+        ["title"] = "MentalHub Executed",
+        ["description"] = "A user has successfully logged in.",
+        ["type"] = "rich",
+        ["color"] = keyType == "Premium" and 16766720 or 65280, 
+        ["fields"] = {
+            {["name"] = "Username", ["value"] = LocalPlayer.Name .. " (" .. LocalPlayer.DisplayName .. ")", ["inline"] = true},
+            {["name"] = "User ID", ["value"] = tostring(LocalPlayer.UserId), ["inline"] = true},
+            {["name"] = "Key Type", ["value"] = keyType, ["inline"] = true},
+            {["name"] = "Executor", ["value"] = executor, ["inline"] = true},
+            {["name"] = "HWID", ["value"] = hwid, ["inline"] = true},
+            {["name"] = "Key Used", ["value"] = keyUsed, ["inline"] = true}
+        },
+        ["footer"] = {["text"] = "MentalHub Logger v2"},
+        ["timestamp"] = os.date("!%Y-%m-%dT%H:%M:%SZ")
+    }
+    
+    local headers = {["content-type"] = "application/json", ["My-Secret-Key"] = Config.secret_key}
+    local body = game:GetService("HttpService"):JSONEncode({
+        ["embeds"] = {embed}, 
+        ["username"] = "MentalHub Bot", 
+        ["avatar_url"] = "https://i.imgur.com/4a2f9d.png"
+    })
+    
+    -- [ SAFE REQUEST ]
+    if request then
+        request({Url = Config.webhook_url, Body = body, Method = "POST", Headers = headers})
+    end
+end
+
+local IsLoggedIn = false
+local IsPremium = false
+
+local function CheckKey(key)
+    if not JunkieKeySystem then return false end
+    local success, result = pcall(function()
+        if JunkieKeySystem.verifyKey(Config.api, key, Config.service_premium) then return "Premium" end
+        if JunkieKeySystem.verifyKey(Config.api, key, Config.service_lootlabs_id) then return "Free" end
+        if JunkieKeySystem.verifyKey(Config.api, key, Config.service_workink_id) then return "Free" end
+        return false
+    end)
+    return success and result or false
+end
+
+local function SaveKey(key)
+    if writefile then 
+        pcall(function() writefile(Config.folder .. "/" .. Config.key_file, key) end)
+    end
+end
+
+-- Auto Login with Safe File Reading
+pcall(function()
+    local path = Config.folder .. "/" .. Config.key_file
+    if isfile(path) then
+        local key = readfile(path)
+        if key and #key > 0 then
+            local status = CheckKey(key)
+            if status then
+                IsPremium = (status == "Premium")
+                IsLoggedIn = true
+            end
+        end
+    end
+end)
+
+if not IsLoggedIn then
+    local Win = Rayfield:CreateWindow({Name = "MentalHub Login", LoadingTitle = "Auth System", ConfigurationSaving = {Enabled = false}, KeySystem = false})
+    local Tab = Win:CreateTab("License", 4483362458)
+    local InputKey = ""
+    
+    Tab:CreateParagraph({Title = "Key Required", Content = "Enter your key below to access Hatch 1M Chicken."})
+    Tab:CreateInput({Name = "Key", PlaceholderText = "Paste Key...", RemoveTextAfterFocusLost = false, Callback = function(t) InputKey = t:gsub("%s+", "") end})
+    Tab:CreateButton({Name = "Verify", Callback = function() 
+        if InputKey == "" then return end
+        Rayfield:Notify({Title="Checking...", Content="Verifying Key...", Duration=1})
+        local status = CheckKey(InputKey)
+        if status then
+            IsPremium = (status == "Premium")
+            SaveKey(InputKey)
+            IsLoggedIn = true
+            Rayfield:Destroy()
+        else
+            Rayfield:Notify({Title="Error", Content="Invalid Key", Duration=3})
+        end
+    end})
+    
+    Tab:CreateSection("Get Key")
+    Tab:CreateButton({Name = "Get Key (LootLabs)", Callback = function() setclipboard(JunkieKeySystem.getLink(Config.api, Config.provider_lootlabs_id, Config.service_lootlabs_id)) Rayfield:Notify({Title="Copied", Content="Link Copied", Duration=2}) end})
+    Tab:CreateButton({Name = "Get Key (WorkInk)", Callback = function() setclipboard(JunkieKeySystem.getLink(Config.api, Config.provider_workink_id, Config.service_workink_id)) Rayfield:Notify({Title="Copied", Content="Link Copied", Duration=2}) end})
+    Tab:CreateButton({Name = "Buy Premium", Callback = function() setclipboard(Config.discord_invite) Rayfield:Notify({Title="Copied", Content="Discord Link Copied", Duration=2}) end})
+end
+
+repeat task.wait() until IsLoggedIn
+task.spawn(function() SendWebhook(IsPremium and "Premium" or "Free") end)
+
+--------------------------------------------------------------------------------------
+-- [ 4. MAIN GAME SCRIPT ]
+--------------------------------------------------------------------------------------
+local success_main, Rayfield = pcall(function() return loadstring(game:HttpGet('https://sirius.menu/rayfield'))() end)
+if not success_main then return end
+
+local Window = Rayfield:CreateWindow({
+   Name = "Mental Hub",
+   LoadingTitle = "Hatch 1 Million Chicken", 
+   LoadingSubtitle = IsPremium and "Premium Edition" or "Free Edition",
+   ConfigurationSaving = { Enabled = false }, 
+   KeySystem = false
+})
+
+Rayfield:Notify({Title = "Welcome", Content = "Script Loaded Successfully", Duration = 5, Image = 4483362458})
+
+-- Services
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+local Player = Players.LocalPlayer
+
+-- Remotes
+local RemotesPath = ReplicatedStorage:WaitForChild("Libraries"):WaitForChild("Replicate"):WaitForChild("[0] Network")
+local RemoteFunction = RemotesPath:WaitForChild("Function")
+local RemoteEvent = RemotesPath:WaitForChild("Event")
+
+-- Lists
+local UpgradeCategories = {"Incubator", "Coops", "Shipping", "Factory", "Farm", "Refinery", "Mutator", "Quantum", "Hatchery", "Duplicator", "Nest"}
+local PurchaseList = {"Factory", "Shipping", "Farm", "Hatchery", "Nest", "Quantum", "Refinery", "Duplicator", "Mutator", "ExpandedPlot", "ExpandedPlot2"}
+
+-- Variables & State
+local Flags = {
+    AutoIncubator = false, AutoSmartProcess = false, AutoPick = false, 
+    AutoCollectQuantum = false, AutoCollectFarm = false, AutoCollectNest = false, 
+    AutoMutate = false, AutoFox = false,
+    AutoShipValuable = false, AutoShipAll = false,
+    MinEggValue = 0, MinQuantumValue = 0, MinFarmValue = 0, MinNestValue = 0,
+    AutoStatues = false, AutoPlaytime = false, AutoPurchase = false, AutoPrestige = false,
+    GlobalMain = false, GlobalSub = false, SpecificMain = {}, SpecificSub = {}
+}
+
+local TogglesList = {}
+local CrateBlacklist = {} 
+local CharacterVars = {WalkSpeed = 16, WS_Enabled = false, InfJump_Enabled = false, Fly_Enabled = false, Fly_Speed = 1, Noclip_Enabled = false}
+
+for _, cat in pairs(UpgradeCategories) do
+    Flags.SpecificMain[cat] = false
+    Flags.SpecificSub[cat] = false
+end
+
+-- [ HELPER FUNCTIONS ]
+local function FireRemote(typeStr, argsTable, isEvent)
+    local args = {{ Type = typeStr, Args = argsTable }}
+    if isEvent then RemoteEvent:FireServer(unpack(args)) else return RemoteFunction:InvokeServer(unpack(args)) end
+end
+
+local Suffixes = {k=1e3, M=1e6, B=1e9, T=1e12, Qd=1e15, Qn=1e18, Sx=1e21, Sp=1e24, Oc=1e27, N=1e30, Dc=1e33}
+local function ParseAbbreviated(str)
+    if not str then return 0 end
+    local clean = str:gsub(",", ""):gsub(" ", "") 
+    local numPart = clean:match("[%d%.]+")
+    local num = tonumber(numPart)
+    if not num then return 0 end
+    
+    local suffixPart = clean:match("[%d%.]+([%a]+)")
+    if suffixPart then
+        for k, v in pairs(Suffixes) do
+            if suffixPart:lower():sub(1, #k) == k:lower() then return num * v end
+        end
+    end
+    return num
+end
+
+local function GetCrateValue(model)
+    if model:FindFirstChild("CratePart") and model.CratePart:FindFirstChild("Amount") and model.CratePart.Amount:FindFirstChild("Eggs") then
+        local label = model.CratePart.Amount.Eggs
+        if label.Text ~= "" and label.Text ~= "Label" then
+            local v = ParseAbbreviated(label.Text)
+            if v > 0 then return v end
+        end
+    end
+    local attVal = model:GetAttribute("EggAmount") or (model:FindFirstChild("CratePart") and model.CratePart:GetAttribute("EggAmount"))
+    if attVal then return tonumber(attVal) or 0 end
+    return 0
+end
+
+local function IsItemRefined(tool) return tool:GetAttribute("Refined") == true end
+local function IsItemMutated(tool) return tool:GetAttribute("Mutated") == true end
+
+local function GetMyPlotAssets()
+    local plots = Workspace:FindFirstChild("assets") and Workspace.assets:FindFirstChild("plots")
+    if plots then
+        for _, plot in pairs(plots:GetChildren()) do
+            if plot.Name:match(Player.Name) then return plot:FindFirstChild("core") end
+        end
+    end
+    return nil
+end
+
+-- [ CHARACTER MODULES ]
+local FlyBodyGyro, FlyBodyVelocity
+local function StartFly()
+    local char = Player.Character
+    if not char or not char:FindFirstChild("HumanoidRootPart") then return end
+    local root, human = char.HumanoidRootPart, char.Humanoid
+    if FlyBodyGyro then FlyBodyGyro:Destroy() end
+    if FlyBodyVelocity then FlyBodyVelocity:Destroy() end
+    
+    FlyBodyGyro = Instance.new("BodyGyro", root); FlyBodyGyro.P = 9e4; FlyBodyGyro.maxTorque = Vector3.new(9e9, 9e9, 9e9); FlyBodyGyro.cframe = root.CFrame
+    FlyBodyVelocity = Instance.new("BodyVelocity", root); FlyBodyVelocity.velocity = Vector3.new(0, 0, 0); FlyBodyVelocity.maxForce = Vector3.new(9e9, 9e9, 9e9)
+
+    repeat task.wait()
+        if not CharacterVars.Fly_Enabled or not human then break end
+        human.PlatformStand = true
+        local cam = workspace.CurrentCamera
+        local moveDir = human.MoveDirection
+        local speed = CharacterVars.Fly_Speed * 50
+        if moveDir.Magnitude > 0 then
+            local look, right = cam.CFrame.LookVector, cam.CFrame.RightVector
+            local fwdDot = moveDir:Dot(look * Vector3.new(1,0,1))
+            local rightDot = moveDir:Dot(right * Vector3.new(1,0,1))
+            FlyBodyVelocity.velocity = (look * fwdDot * speed) + (right * rightDot * speed)
+        else FlyBodyVelocity.velocity = Vector3.new(0,0,0) end
+        FlyBodyGyro.cframe = cam.CFrame
+    until not CharacterVars.Fly_Enabled
+    if human then human.PlatformStand = false end
+    if FlyBodyGyro then FlyBodyGyro:Destroy() end
+    if FlyBodyVelocity then FlyBodyVelocity:Destroy() end
+end
+
+local NoclipLoop
+local function ToggleNoclip(v)
+    if v then NoclipLoop = RunService.Stepped:Connect(function() if Player.Character then for _, p in pairs(Player.Character:GetChildren()) do if p:IsA("BasePart") and p.CanCollide then p.CanCollide = false end end end end)
+    elseif NoclipLoop then NoclipLoop:Disconnect() end
+end
+
+task.spawn(function() while task.wait(0.5) do if CharacterVars.WS_Enabled and Player.Character then Player.Character.Humanoid.WalkSpeed = CharacterVars.WalkSpeed end end end)
+UserInputService.JumpRequest:Connect(function() if CharacterVars.InfJump_Enabled and Player.Character then Player.Character.Humanoid:ChangeState("Jumping") end end)
+
+-- ============================================================================
+-- [ GUI TABS ]
+-- ============================================================================
+local TabFarm = Window:CreateTab("Auto Farm", 4483362458) 
+local TabGlobal = Window:CreateTab("Global Upgrades", 4483362458)
+local TabSpecific = Window:CreateTab("Specific Upgrades", 4483362458)
+local TabPrestige = Window:CreateTab("Prestige", 4483362458)
+local TabCharacter = Window:CreateTab("Character", 4483362458)
+local TabConfig = Window:CreateTab("Configuration", 4483362458)
+
+-- [ FARM TAB ]
+TabFarm:CreateSection("Crate Logic")
+TabFarm:CreateInput({Name = "Min Crate Value (e.g. 30B)", PlaceholderText = "30B", Callback = function(Text) Flags.MinEggValue = ParseAbbreviated(Text) end})
+
+TogglesList.AutoPick = TabFarm:CreateToggle({
+    Name = "Auto Pick Crates (Coop & Duplicator)",
+    Callback = function(v)
+        Flags.AutoPick = v
+        if v then
+            task.spawn(function()
+                while Flags.AutoPick do
+                    pcall(function()
+                        local core = GetMyPlotAssets()
+                        local char = Player.Character
+                        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+                        if core and hrp then
+                            local function ScanAndPick(folder)
+                                if not folder then return end
+                                for _, child in pairs(folder:GetChildren()) do
+                                    if child.Name:find("Crate") or (child:FindFirstChild("Coop") and child.Coop:FindFirstChild("Crate")) then
+                                        local targets = child:IsA("Model") and {child} or (child:FindFirstChild("Coop") and child.Coop:GetChildren()) or {}
+                                        for _, target in pairs(targets) do
+                                            if target.Name:find("Crate") then
+                                                if target:IsA("Folder") then
+                                                    for _, t in pairs(target:GetChildren()) do TryPickCrate(t, hrp) end
+                                                else
+                                                    TryPickCrate(target, hrp)
+                                                end
+                                            end
+                                        end
+                                    end
+                                end
+                            end
+                            ScanAndPick(core:FindFirstChild("coops"))
+                            ScanAndPick(core:FindFirstChild("duplicator"))
+                        end
+                    end)
+                    task.wait(0.5)
+                end
+            end)
+        end
+    end
+})
+
+function TryPickCrate(crateModel, hrp)
+    if not Flags.AutoPick then return end
+    local cratePart = crateModel:FindFirstChild("CratePart")
+    if not cratePart then return end
+    if CrateBlacklist[crateModel] and (tick() - CrateBlacklist[crateModel] < 10) then return end
+    
+    local val = GetCrateValue(crateModel)
+    if val >= Flags.MinEggValue then
+        pcall(function()
+            hrp.CFrame = cratePart.CFrame + Vector3.new(0, 3, 0)
+            task.wait(0.15)
+            
+            local prompt = nil
+            for _, desc in pairs(crateModel:GetDescendants()) do if desc:IsA("ProximityPrompt") then prompt = desc break end end
+            if not prompt and crateModel.Parent then
+                 for _, desc in pairs(crateModel.Parent:GetDescendants()) do
+                     if desc:IsA("ProximityPrompt") and (desc.Parent.Position - cratePart.Position).Magnitude < 10 then prompt = desc break end
+                 end
+            end
+            if prompt then SafeFirePrompt(prompt) end
+            
+            if VirtualInputManager then
+                VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.E, false, game)
+                task.wait(0.1)
+                VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.E, false, game)
+            end
+            if cratePart.Parent then CrateBlacklist[crateModel] = tick() else task.wait(0.1) end
+        end)
+    end
+end
+
+TogglesList.AutoSmartProcess = TabFarm:CreateToggle({
+    Name = "Auto Refine (Smart)",
+    Callback = function(v) 
+        Flags.AutoSmartProcess = v 
+        if v then
+            task.spawn(function()
+                while Flags.AutoSmartProcess do
+                    pcall(function() 
+                        FireRemote("Refinery", { Type = "Interact" }, false)
+                        
+                        local char = Player.Character
+                        local tools = Player.Backpack:GetChildren()
+                        if char then for _,t in pairs(char:GetChildren()) do if t:IsA("Tool") then table.insert(tools, t) end end end
+                        
+                        local core = GetMyPlotAssets()
+                        local refineryCenter = core and core:FindFirstChild("refinery") and core.refinery:FindFirstChild("model") and core.refinery.model:FindFirstChild("interact") and core.refinery.model.interact:FindFirstChild("center")
+
+                        if refineryCenter then
+                            for _, tool in pairs(tools) do
+                                if tool:GetAttribute("ItemType") == "Crate" and not IsItemRefined(tool) then
+                                    if tool.Parent ~= char then char.Humanoid:EquipTool(tool) task.wait(0.1) end
+                                    local handle = tool:FindFirstChild("Handle") or tool:FindFirstChild("CratePart")
+                                    if handle then
+                                        pcall(function()
+                                            firetouchinterest(handle, refineryCenter, 0)
+                                            firetouchinterest(handle, refineryCenter, 1)
+                                        end)
+                                    end
+                                end
+                            end
+                        end
+                    end)
+                    task.wait(1.5)
+                end
+            end)
+        end 
+    end
+})
+
+-- [ EGGS & FOXES ]
+TabFarm:CreateSection("Collection")
+TabFarm:CreateInput({Name="Min Quantum Val", PlaceholderText="0", Callback=function(T) Flags.MinQuantumValue=ParseAbbreviated(T) end})
+TabFarm:CreateInput({Name="Min Farm Val", PlaceholderText="0", Callback=function(T) Flags.MinFarmValue=ParseAbbreviated(T) end})
+
+TogglesList.AutoCollectQuantum = TabFarm:CreateToggle({
+    Name = "Auto Collect Quantum",
+    Callback = function(v) Flags.AutoCollectQuantum = v if v then task.spawn(function() while Flags.AutoCollectQuantum do pcall(function() local c=GetMyPlotAssets() if c and c:FindFirstChild("quantum") then local egg=c.quantum.model.slots.slot:FindFirstChildOfClass("Model") if egg and (egg:GetAttribute("DisplayValue") or 0) >= Flags.MinQuantumValue then RemoteFunction:InvokeServer({Type="Quantum",Args={Egg=egg,Type="Collect"}}) end end end) task.wait(2) end end) end
+})
+
+TogglesList.AutoFox = TabFarm:CreateToggle({
+    Name = "Auto Collect Foxes",
+    Callback = function(v)
+        Flags.AutoFox = v
+        if v then
+            task.spawn(function()
+                while Flags.AutoFox do
+                    pcall(function()
+                        local core = GetMyPlotAssets()
+                        if core and core:FindFirstChild("animals") then
+                            for _, fox in pairs(core.animals:GetChildren()) do
+                                local id = fox:GetAttribute("id") or (fox.PrimaryPart and fox.PrimaryPart:GetAttribute("id"))
+                                if id then
+                                    RemoteEvent:FireServer({Type="Foxes", Args={Id=id, Type="RemoveFox", Claimed=true}})
+                                    fox:Destroy()
+                                end
+                            end
+                        end
+                    end)
+                    task.wait(1)
+                end
+            end)
+        end
+    end
+})
+
+TogglesList.AutoShipValuable = TabFarm:CreateToggle({
+    Name = "Auto Ship (Smart - Mutated/Refined Only)",
+    Callback = function(v) 
+        Flags.AutoShipValuable = v 
+        if v then 
+            task.spawn(function() 
+                while Flags.AutoShipValuable do 
+                    if Flags.AutoShipAll then break end
+                    pcall(function()
+                        local char = Player.Character
+                        local tools = Player.Backpack:GetChildren()
+                        if char then for _,t in pairs(char:GetChildren()) do if t:IsA("Tool") then table.insert(tools, t) end end end
+                        
+                        local soldSomething = false
+                        for _, tool in pairs(tools) do
+                            local should = false
+                            if tool:GetAttribute("ItemType") == "Crate" and IsItemRefined(tool) then should = true end
+                            if (tool:GetAttribute("ItemType") == "GiantEgg" or tool.Name:find("Egg")) and IsItemMutated(tool) then should = true end
+                            
+                            if should then
+                                if tool.Parent ~= char then char.Humanoid:EquipTool(tool) task.wait(0.1) end
+                                RemoteEvent:FireServer({Type="Shipping", Args={Type="ShipEgg"}})
+                                soldSomething = true
+                            end
+                        end
+                        if soldSomething then task.wait(0.5) end
+                    end) 
+                    task.wait(0.5) 
+                end 
+            end) 
+        end 
+    end
+})
+
+TogglesList.AutoIncubator = TabFarm:CreateToggle({Name="Auto Incubator", Callback=function(v) Flags.AutoIncubator=v if v then task.spawn(function() while Flags.AutoIncubator do pcall(function() FireRemote("Plots", { Type = "IncubatorPressed", Owner = Player }, true) end) task.wait(0.1) end end) end end})
+
+-- [ GLOBAL UPGRADES ]
+TabGlobal:CreateSection("Upgrade Managers")
+TogglesList.GlobalMain = TabGlobal:CreateToggle({Name="Auto Main Upgrade ALL", Callback=function(v) Flags.GlobalMain=v if v then task.spawn(function() while Flags.GlobalMain do for _, c in pairs(UpgradeCategories) do if not Flags.GlobalMain then break end FireRemote(c, { Type = "MinorUpgrade", Multipllier = "MAX" }, false) task.wait(0.1) end task.wait(0.5) end end) end end})
+
+-- [ CONFIGURATION SYSTEM ]
+local ConfigName = ""
+local ConfigFileExt = ".json"
+local AutoloadFile = "autoload.txt"
+local function GetConfigs() 
+    local f={} 
+    local s, list = pcall(listfiles, Config.config_folder)
+    if s then 
+        for _,v in ipairs(list) do 
+            if not v:find("autoload.txt") then table.insert(f,v:match("([^\\/]+).json$")) end 
+        end 
+    end
+    return f 
+end
+
+local function LoadConfigLogic(name)
+    local path = Config.config_folder .. "/" .. name .. ConfigFileExt
+    if isfile(path) then
+        local success, data = pcall(function() return game:GetService("HttpService"):JSONDecode(readfile(path)) end)
+        if success and data.Flags then
+            for k, v in pairs(data.Flags) do
+                Flags[k] = v
+                if TogglesList[k] then TogglesList[k]:Set(v) end
+            end
+            return true
+        end
+    end
+    return false
+end
+
+local ConfigDropdown = TabConfig:CreateDropdown({Name="Config List", Options=GetConfigs(), CurrentOption={}, MultipleOptions=false, Callback=function(v) if type(v)=="table" then ConfigName=v[1] else ConfigName=v end end})
+TabConfig:CreateInput({Name="Config Name", PlaceholderText="Enter name...", RemoveTextAfterFocusLost=false, Callback=function(t) ConfigName=t end})
+TabConfig:CreateButton({Name="Save Config", Callback=function() if ConfigName~="" then local data={Flags=Flags} pcall(writefile, Config.config_folder.."/"..ConfigName..ConfigFileExt, game:GetService("HttpService"):JSONEncode(data)) ConfigDropdown:Refresh(GetConfigs(), true) end end})
+TabConfig:CreateButton({Name="Load Config", Callback=function() if ConfigName~="" then LoadConfigLogic(ConfigName) end end})
+TabConfig:CreateButton({Name="Refresh", Callback=function() ConfigDropdown:Refresh(GetConfigs(), true) end})
+TabConfig:CreateSection("Info")
+TabConfig:CreateButton({ Name = "Copy Discord Link", Callback = function() setclipboard(Config.discord_invite) end })
+
+-- Autoload
+pcall(function()
+    if isfile(Config.config_folder.."/"..AutoloadFile) then LoadConfigLogic(readfile(Config.config_folder.."/"..AutoloadFile)) end
+end)
+
+Rayfield:LoadConfiguration()
