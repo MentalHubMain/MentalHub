@@ -1,0 +1,36 @@
+{
+  "_notes": {
+    "adding a new game": "add a new block under games, give it any name you want, throw all the place ids in the ids list, paste the script url, and set keyless to false. thats it.",
+    "adding a keyless game": "same as above but keyless set to true, the loader will handle the getgenv line automatically so dont worry about that",
+    "multiple ids same game": "just dump all the ids in the same ids array, they all point to the same url so no need to copy paste the url multiple times",
+    "making changes": "just edit this file and commit, changes go live instantly, no need to touch the loader worker at all"
+  },
+
+  "games": {
+    "fishies": {
+      "ids": ["91296119701853", "103967585774012"],
+      "url": "https://api.junkie-development.de/api/v1/luascripts/public/8ecb3e8d0d02c979976ff01dde7519f76a82c90df6b203200bfd5cdce751cc35/download",
+      "keyless": false
+    },
+    "wastetime": {
+      "ids": ["129548273770183", "139877050346809", "92050243909420", "99207780794303"],
+      "url": "https://api.jnkie.com/api/v1/luascripts/public/0582d4d3a607c2a79b4ff7c7a3f641120a10fb730d98a8f4aaf582a3adc82388/download",
+      "keyless": false
+    },
+    "hatch1millionchicken": {
+      "ids": ["112781992170158"],
+      "url": "https://api.junkie-development.de/api/v1/luascripts/public/6277630d47814ab96358696c20b1105356b12c0faec7bdd0b744c01ac8feda5a/download",
+      "keyless": false
+    },
+    "watchnumbergoup": {
+      "ids": ["78491332555415"],
+      "url": "https://api.jnkie.com/api/v1/luascripts/public/223b84f4f33d15edfd1c0f62982f90c0892b3228793c9b7eb99326f1ecfeb49f/download",
+      "keyless": true
+    },
+    "watchnumbergoup2": {
+      "ids": ["123821081589134"],
+      "url": "https://api.jnkie.com/api/v1/luascripts/public/2962579a687b7aa9eb08992fc173ab90fb5e497434a432e449a0e67bed1edc22/download",
+      "keyless": true
+    }
+  }
+}
